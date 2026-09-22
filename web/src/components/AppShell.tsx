@@ -1,5 +1,6 @@
 'use client';
 
+import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
 import AppBar from '@mui/material/AppBar';
 import Box from '@mui/material/Box';
 import Container from '@mui/material/Container';
@@ -61,7 +62,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             <NavLink href="/stock">Stock on hand</NavLink>
           </Stack>
 
-          <Tooltip title="Mints a bearer token for the selected seeded user. The API enforces the role regardless of what this is set to.">
+          <Stack direction="row" spacing={0.5} sx={{ alignItems: 'center' }}>
             <TextField
               select
               size="small"
@@ -82,7 +83,20 @@ export function AppShell({ children }: { children: ReactNode }) {
                 </MenuItem>
               ))}
             </TextField>
-          </Tooltip>
+
+            {/*
+              The explanation hangs off its own icon rather than the select. On
+              the select it fired every time someone reached for the dropdown,
+              which is exactly when it is in the way.
+            */}
+            <Tooltip title="Demo sign-in: picks one of the seeded users and mints their bearer token. The API enforces the role on its own regardless of what this is set to.">
+              <InfoOutlinedIcon
+                fontSize="small"
+                aria-label="About the role switcher"
+                sx={{ color: 'text.disabled', cursor: 'help' }}
+              />
+            </Tooltip>
+          </Stack>
         </Toolbar>
       </AppBar>
 

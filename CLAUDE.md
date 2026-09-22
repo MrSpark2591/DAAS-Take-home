@@ -101,6 +101,26 @@ The UI mirrors these rules via `canReceiveStock` / `canManagePurchaseOrders` in
 `web/src/lib/session.ts`. **The UI copy is cosmetic.** Adding a client-side check is never a
 substitute for the server-side one.
 
+### Authentication
+
+Access token = short-lived JWT, stateless. Refresh token = opaque, hashed in the DB, rotated
+on every use, with reuse detection that revokes the whole family.
+
+Three things in this area will bite you if you change them carelessly:
+
+- **Never revoke inside a transaction that then throws.** Reuse detection has to persist the
+  revocation *and* reject the caller; a rollback silently undoes the revocation and leaves the
+  stolen session alive. This was a real bug, caught by a test.
+- **The refresh claim must stay a single conditional `UPDATE`** (`rotated_at IS NULL` in the
+  `where`). Read-then-write lets two concurrent refreshes both succeed.
+- **The client must single-flight refreshes** (`refreshInFlight` in `web/src/lib/api.ts`).
+  Parallel refreshes are indistinguishable from theft, so dropping the mutex makes the app log
+  users out by itself.
+
+Never read a token TTL at module load — use the lazy accessors in `shared/tokens.ts`. A
+module-level `process.env` read captures whatever was set when the file was first imported,
+which silently ignored `.env`. `shared/env.ts` loads the file and `readInt` reads at call time.
+
 ---
 
 ## Layering

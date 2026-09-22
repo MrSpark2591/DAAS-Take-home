@@ -1,7 +1,6 @@
 import type { Metadata } from 'next';
 import { Geist, Geist_Mono } from 'next/font/google';
 import type { ReactNode } from 'react';
-import { AppShell } from '@/components/AppShell';
 import { Providers } from './providers';
 
 const geistSans = Geist({ variable: '--font-geist-sans', subsets: ['latin'] });
@@ -22,9 +21,12 @@ export default function RootLayout({ children }: { children: ReactNode }) {
         mismatches inside the app still surface normally.
       */}
       <body suppressHydrationWarning>
-        <Providers>
-          <AppShell>{children}</AppShell>
-        </Providers>
+        {/*
+          Only the store and theme live here. The app chrome and the session
+          guard belong to the (app) route group, so /login can render without
+          either of them.
+        */}
+        <Providers>{children}</Providers>
       </body>
     </html>
   );

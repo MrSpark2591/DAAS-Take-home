@@ -1,5 +1,6 @@
 import { type Location, PrismaClient, type Product, type User, type Vendor } from '@prisma/client';
 import type { Actor } from '../src/shared/auth.js';
+import { hashPassword } from '../src/shared/password.js';
 
 /**
  * Test fixtures against the real Postgres from docker-compose.
@@ -28,16 +29,39 @@ let counter = 0;
 /** Unique per call so parallel test files never collide on a partial index. */
 const unique = (prefix: string) => `${prefix}-${process.pid}-${counter++}`;
 
+/**
+ * The password every fixture user gets. Hashed once for the whole run: scrypt
+ * is deliberately slow, and paying that per user per test would dominate the
+ * suite's runtime for no added coverage.
+ */
+export const FIXTURE_PASSWORD = 'fixture-password';
+const fixturePasswordHash = await hashPassword(FIXTURE_PASSWORD);
+
 export async function seedFixtures(): Promise<Fixtures> {
   const [admin, warehouse, viewer] = await Promise.all([
     prisma.user.create({
-      data: { email: `${unique('admin')}@test.local`, name: 'Admin', role: 'ADMIN' },
+      data: {
+        email: `${unique('admin')}@test.local`,
+        name: 'Admin',
+        role: 'ADMIN',
+        passwordHash: fixturePasswordHash,
+      },
     }),
     prisma.user.create({
-      data: { email: `${unique('wh')}@test.local`, name: 'Warehouse', role: 'WAREHOUSE' },
+      data: {
+        email: `${unique('wh')}@test.local`,
+        name: 'Warehouse',
+        role: 'WAREHOUSE',
+        passwordHash: fixturePasswordHash,
+      },
     }),
     prisma.user.create({
-      data: { email: `${unique('viewer')}@test.local`, name: 'Viewer', role: 'VIEWER' },
+      data: {
+        email: `${unique('viewer')}@test.local`,
+        name: 'Viewer',
+        role: 'VIEWER',
+        passwordHash: fixturePasswordHash,
+      },
     }),
   ]);
 

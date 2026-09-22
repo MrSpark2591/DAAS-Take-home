@@ -111,14 +111,41 @@ export const MeDocument = /* GraphQL */ `
   }
 `;
 
-/** Bootstraps the demo role switcher. See the schema note on `demoUsers`. */
-export const DemoUsersDocument = /* GraphQL */ `
-  query DemoUsers {
-    demoUsers {
-      id
-      name
-      role
+export const LoginDocument = /* GraphQL */ `
+  mutation Login($input: LoginInput!) {
+    login(input: $input) {
+      expiresIn
+      user {
+        id
+        name
+        email
+        role
+      }
     }
+  }
+`;
+
+/**
+ * Exchanges the refresh cookie for a new pair. Called only by the base query's
+ * reauth path, never directly from a component.
+ */
+export const RefreshSessionDocument = /* GraphQL */ `
+  mutation RefreshSession {
+    refreshSession {
+      expiresIn
+      user {
+        id
+        name
+        email
+        role
+      }
+    }
+  }
+`;
+
+export const LogoutDocument = /* GraphQL */ `
+  mutation Logout {
+    logout
   }
 `;
 

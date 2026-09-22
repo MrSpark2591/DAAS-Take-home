@@ -1,0 +1,61 @@
+enum Role {
+  ADMIN
+  WAREHOUSE
+  VIEWER
+}
+
+"""
+A person who can sign in. Identity lives in this domain; purchasing references
+it for attribution (who raised a PO, who received stock).
+"""
+type User {
+  id: ID!
+  name: String!
+  email: String!
+  role: Role!
+}
+
+"""
+What the client gets back from a sign-in or a refresh.
+
+The refresh token is deliberately absent: it is delivered as an httpOnly
+cookie, so browser JavaScript can never read it. Even the access token is a
+cookie -- this payload carries only what the UI needs to render.
+"""
+type AuthPayload {
+  user: User!
+  "Seconds until the access token expires."
+  expiresIn: Int!
+}
+
+input LoginInput {
+  email: String!
+  password: String!
+}
+
+extend type Query {
+  "The signed-in user, or null when the request carries no valid access token."
+  me: User
+}
+
+extend type Mutation {
+  """
+  Exchange credentials for a session. Sets the access and refresh cookies.
+
+  Fails with UNAUTHENTICATED and a deliberately vague message for both an
+  unknown email and a wrong password.
+  """
+  login(input: LoginInput!): AuthPayload!
+
+  """
+  Exchange the refresh cookie for a new access token and a new refresh token.
+
+  The presented refresh token is retired in the same transaction that issues
+  its replacement. Presenting an already-retired token is treated as theft and
+  revokes every session descended from that sign-in.
+  """
+  refreshSession: AuthPayload!
+
+  "Revokes this session everywhere it was rotated to, and clears the cookies."
+  logout: Boolean!
+}

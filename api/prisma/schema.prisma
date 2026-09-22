@@ -44,6 +44,9 @@ model User {
   email String @db.VarChar(320)
   name  String @db.VarChar(120)
   role  Role
+  /// scrypt, encoded as `scrypt$N$r$p$salt$hash`. The parameters travel with
+  /// the hash so they can be raised later without invalidating old passwords.
+  passwordHash String @map("password_hash") @db.VarChar(255)
 
   createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
@@ -51,8 +54,45 @@ model User {
 
   purchaseOrders PurchaseOrder[]
   stockMovements StockMovement[]
+  refreshTokens  RefreshToken[]
 
   @@map("users")
+}
+
+/// One row per issued refresh token.
+///
+/// Refresh tokens are opaque random bytes rather than JWTs: they must be
+/// revocable, which makes them stateful anyway, so a signed self-describing
+/// token would buy nothing. Only the SHA-256 hash is stored, for the same
+/// reason passwords are hashed -- a dump of this table must not yield usable
+/// sessions.
+model RefreshToken {
+  id     String @id @default(uuid(7)) @db.Uuid
+  userId String @map("user_id") @db.Uuid
+  /// SHA-256 of the opaque token, hex. Unique so a lookup is a single index hit.
+  tokenHash String @unique @map("token_hash") @db.VarChar(64)
+  /// Every token rotated from one login shares a family id. Presenting an
+  /// already-rotated token means it leaked, and the whole family is revoked.
+  familyId String @map("family_id") @db.Uuid
+
+  expiresAt DateTime  @map("expires_at") @db.Timestamptz(6)
+  /// Set when this token was exchanged for a new one. Non-null means spent.
+  rotatedAt DateTime? @map("rotated_at") @db.Timestamptz(6)
+  /// Set on logout, or when reuse detection kills the family.
+  revokedAt DateTime? @map("revoked_at") @db.Timestamptz(6)
+
+  /// Captured for the audit trail, so a suspicious session is identifiable.
+  userAgent String? @map("user_agent") @db.VarChar(400)
+  ipAddress String? @map("ip_address") @db.VarChar(64)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([familyId])
+  @@index([expiresAt])
+  @@map("refresh_tokens")
 }
 
 model Vendor {

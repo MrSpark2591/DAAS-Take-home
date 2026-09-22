@@ -172,6 +172,16 @@
           }
         }
       }
+    },
+    {
+      "includes": ["web/src/app/**/route.ts"],
+      "linter": {
+        "rules": {
+          "style": {
+            "useNamingConvention": "off"
+          }
+        }
+      }
     }
   ]
 }

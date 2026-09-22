@@ -1,43 +1,30 @@
 'use client';
 
-import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
+import LogoutIcon from '@mui/icons-material/Logout';
 import AppBar from '@mui/material/AppBar';
+import Avatar from '@mui/material/Avatar';
 import Box from '@mui/material/Box';
+import Chip from '@mui/material/Chip';
 import Container from '@mui/material/Container';
+import Divider from '@mui/material/Divider';
+import ListItemIcon from '@mui/material/ListItemIcon';
+import ListItemText from '@mui/material/ListItemText';
+import Menu from '@mui/material/Menu';
 import MenuItem from '@mui/material/MenuItem';
 import Stack from '@mui/material/Stack';
-import TextField from '@mui/material/TextField';
 import Toolbar from '@mui/material/Toolbar';
 import Tooltip from '@mui/material/Tooltip';
 import Typography from '@mui/material/Typography';
 import Link from 'next/link';
-import { type ReactNode, useEffect } from 'react';
-import { useDemoUsersQuery } from '@/lib/api';
-import { useAppDispatch, useAppSelector } from '@/lib/hooks';
-import { type Role, signedInAs } from '@/lib/session';
+import { type ReactNode, useState } from 'react';
+import { useLogoutMutation } from '@/lib/api';
+import { useAppSelector } from '@/lib/hooks';
 
-/**
- * Header, nav, and the demo role switcher.
- *
- * Switching role remints the bearer token in the store; RTK Query reads it on
- * the next request, so the whole app changes identity without a reload.
- */
+/** Header, nav, and the signed-in user's menu. */
 export function AppShell({ children }: { children: ReactNode }) {
-  const dispatch = useAppDispatch();
-  const session = useAppSelector((state) => state.session);
-  const { data } = useDemoUsersQuery();
-
-  const users = data?.demoUsers ?? [];
-
-  // Default to the admin once the seeded users arrive, so a reviewer lands on
-  // a session that can do everything rather than an empty one.
-  useEffect(() => {
-    if (session.user || users.length === 0) return;
-    const admin = users.find((user) => user.role === 'ADMIN') ?? users[0];
-    if (admin) {
-      dispatch(signedInAs({ id: admin.id, label: admin.name, role: admin.role as Role }));
-    }
-  }, [users, session.user, dispatch]);
+  const user = useAppSelector((state) => state.session.user);
+  const [logout, logoutState] = useLogoutMutation();
+  const [anchor, setAnchor] = useState<HTMLElement | null>(null);
 
   return (
     <Box sx={{ minHeight: '100dvh', bgcolor: 'background.default' }}>
@@ -62,41 +49,70 @@ export function AppShell({ children }: { children: ReactNode }) {
             <NavLink href="/stock">Stock on hand</NavLink>
           </Stack>
 
-          <Stack direction="row" spacing={0.5} sx={{ alignItems: 'center' }}>
-            <TextField
-              select
-              size="small"
-              label="Acting as"
-              value={session.user?.id ?? ''}
-              sx={{ minWidth: 220 }}
-              slotProps={{ htmlInput: { 'aria-label': 'Acting as role' } }}
-              onChange={(event) => {
-                const user = users.find((candidate) => candidate.id === event.target.value);
-                if (user) {
-                  dispatch(signedInAs({ id: user.id, label: user.name, role: user.role as Role }));
-                }
-              }}
-            >
-              {users.map((user) => (
-                <MenuItem key={user.id} value={user.id}>
-                  {user.name}
-                </MenuItem>
-              ))}
-            </TextField>
+          {user ? (
+            <>
+              <Tooltip title="Account">
+                <Stack
+                  direction="row"
+                  spacing={1}
+                  component="button"
+                  type="button"
+                  onClick={(event) => setAnchor(event.currentTarget)}
+                  aria-haspopup="menu"
+                  aria-label={`Account menu for ${user.name}`}
+                  sx={{
+                    alignItems: 'center',
+                    background: 'none',
+                    border: 'none',
+                    cursor: 'pointer',
+                    p: 0.5,
+                    borderRadius: 1,
+                    '&:hover': { bgcolor: 'action.hover' },
+                  }}
+                >
+                  <Avatar sx={{ width: 30, height: 30, fontSize: 13, bgcolor: 'primary.main' }}>
+                    {initials(user.name)}
+                  </Avatar>
+                  <Box sx={{ textAlign: 'left', display: { xs: 'none', sm: 'block' } }}>
+                    <Typography variant="body2" sx={{ fontWeight: 600, lineHeight: 1.2 }}>
+                      {user.name}
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      {ROLE_LABEL[user.role]}
+                    </Typography>
+                  </Box>
+                </Stack>
+              </Tooltip>
 
-            {/*
-              The explanation hangs off its own icon rather than the select. On
-              the select it fired every time someone reached for the dropdown,
-              which is exactly when it is in the way.
-            */}
-            <Tooltip title="Demo sign-in: picks one of the seeded users and mints their bearer token. The API enforces the role on its own regardless of what this is set to.">
-              <InfoOutlinedIcon
-                fontSize="small"
-                aria-label="About the role switcher"
-                sx={{ color: 'text.disabled', cursor: 'help' }}
-              />
-            </Tooltip>
-          </Stack>
+              <Menu
+                anchorEl={anchor}
+                open={Boolean(anchor)}
+                onClose={() => setAnchor(null)}
+                anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+                transformOrigin={{ vertical: 'top', horizontal: 'right' }}
+              >
+                <Box sx={{ px: 2, py: 1 }}>
+                  <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                    {user.email}
+                  </Typography>
+                  <Chip size="small" label={ROLE_LABEL[user.role]} sx={{ mt: 0.5 }} />
+                </Box>
+                <Divider />
+                <MenuItem
+                  onClick={() => {
+                    setAnchor(null);
+                    void logout();
+                  }}
+                  disabled={logoutState.isLoading}
+                >
+                  <ListItemIcon>
+                    <LogoutIcon fontSize="small" />
+                  </ListItemIcon>
+                  <ListItemText>Sign out</ListItemText>
+                </MenuItem>
+              </Menu>
+            </>
+          ) : null}
         </Toolbar>
       </AppBar>
 
@@ -105,6 +121,20 @@ export function AppShell({ children }: { children: ReactNode }) {
       </Container>
     </Box>
   );
+}
+
+const ROLE_LABEL: Record<string, string> = {
+  ADMIN: 'Admin',
+  WAREHOUSE: 'Warehouse',
+  VIEWER: 'Viewer',
+};
+
+function initials(name: string): string {
+  return name
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase() ?? '')
+    .join('');
 }
 
 function NavLink({ href, children }: { href: string; children: ReactNode }) {

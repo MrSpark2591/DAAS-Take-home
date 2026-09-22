@@ -1,15 +1,43 @@
 # Demo — the operations behind the screens
 
 Every GraphQL operation the UI sends, in the order a walkthrough hits them. Paste any of these
-into <http://localhost:4000> with an `Authorization` header, or watch them go out in the
-network tab.
+into <http://localhost:4000> or watch them go out in the network tab.
 
-The bearer tokens are printed by `npm run seed` and again when the API boots with
-`DEV_AUTH_DEBUG=true`:
+## 0. Signing in
 
+Sessions are cookie-based, so a client needs a cookie jar. With curl:
+
+```bash
+curl -s -c jar.txt -X POST http://localhost:3000/api/graphql \
+  -H 'content-type: application/json' \
+  -d '{"query":"mutation($i:LoginInput!){login(input:$i){user{name role} expiresIn}}","variables":{"i":{"email":"ada@daas.test","password":"daas-dev-password"}}}'
 ```
-Authorization: Bearer daas_<base64url({"sub":"<uuid>","role":"ADMIN"})>
+
+That sets two httpOnly cookies — a 15-minute access JWT and a 30-day rotating refresh token.
+Every later call just needs `-b jar.txt`. Seeded accounts: `ada@daas.test` (admin),
+`wes@daas.test` (warehouse), `vic@daas.test` (viewer).
+
+The API also accepts `Authorization: Bearer <access token>`, so the Apollo sandbox and the
+integration tests can drive it without cookies.
+
+### The session lifecycle, worth demonstrating
+
+```bash
+# Rotate: issues a new pair and retires the presented token
+curl -s -b jar.txt -c jar.txt -X POST http://localhost:3000/api/graphql \
+  -H 'content-type: application/json' \
+  -d '{"query":"mutation{refreshSession{expiresIn}}"}'
 ```
+
+Replay the *previous* refresh token after that and the API answers:
+
+```json
+{ "errors": [{ "message": "Session reuse detected. All sessions have been signed out.",
+               "extensions": { "code": "UNAUTHENTICATED" } }] }
+```
+
+— and the legitimate token is dead too, because the whole family is revoked. That is the
+point of rotation: a stolen token cannot be used quietly.
 
 ---
 
@@ -141,8 +169,8 @@ the dialog can put a message on the right row:
 }
 ```
 
-**Forbidden** — same call with Vic's `VIEWER` token. The UI disables the button, but this is the
-check that actually enforces it:
+**Forbidden** — same call signed in as Vic (`VIEWER`). The UI disables the button, but this is
+the check that actually enforces it:
 
 ```json
 {
@@ -207,12 +235,14 @@ anything about purchase orders.
 
 ## Suggested walkthrough
 
-1. **Purchase orders** — four seeded POs, one per status. Filter to *Partially received*.
-2. Open **PO-1002**. Note the per-line progress bars and the existing receipt history.
-3. **Receive stock** → type `99` into a line. Client-side: *"Only 12 outstanding."*
-4. Correct it to `5`, add a delivery note, confirm. Received goes 8 → 13, "7 left", and a new
+1. **Sign in** at `/login` as `ada@daas.test`. Note `document.cookie` is empty in devtools —
+   both tokens are httpOnly, so no script can read them.
+2. **Purchase orders** — four seeded POs, one per status. Filter to *Partially received*.
+3. Open **PO-1002**. Note the per-line progress bars and the existing receipt history.
+4. **Receive stock** → type `99` into a line. Client-side: *"Only 12 outstanding."*
+5. Correct it to `5`, add a delivery note, confirm. Received goes 8 → 13, "7 left", and a new
    audit line appears — no reload.
-5. **Stock on hand** — `SR-HD-101` is now 13. The cache tag did that.
-6. Switch **Acting as** to *Vic (Viewer)*. **Receive stock** is disabled with a tooltip; the API
-   returns `FORBIDDEN` regardless.
-7. `cd api && npm run check:ledger` — the ledger and the projection still agree.
+6. **Stock on hand** — `SR-HD-101` is now 13. The cache tag did that.
+7. Sign out, sign back in as `vic@daas.test`. **Receive stock** is disabled; the API returns
+   `FORBIDDEN` regardless of what the UI shows.
+8. `cd api && npm run check:ledger` — the ledger and the projection still agree.

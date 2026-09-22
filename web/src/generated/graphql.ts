@@ -15,6 +15,19 @@ export type Scalars = {
   DateTime: { input: string; output: string; }
 };
 
+/**
+ * What the client gets back from a sign-in or a refresh.
+ *
+ * The refresh token is deliberately absent: it is delivered as an httpOnly
+ * cookie, so browser JavaScript can never read it. Even the access token is a
+ * cookie -- this payload carries only what the UI needs to render.
+ */
+export type AuthPayload = {
+  /** Seconds until the access token expires. */
+  expiresIn: Scalars['Int']['output'];
+  user: User;
+};
+
 export type CreatePurchaseOrderInput = {
   lines: Array<CreatePurchaseOrderLineInput>;
   locationId: Scalars['ID']['input'];
@@ -35,6 +48,11 @@ export type Location = {
   name: Scalars['String']['output'];
 };
 
+export type LoginInput = {
+  email: Scalars['String']['input'];
+  password: Scalars['String']['input'];
+};
+
 export type MovementType =
   | 'ADJUSTMENT'
   | 'ALLOCATION'
@@ -46,6 +64,15 @@ export type Mutation = {
   /** Requires ADMIN. */
   createPurchaseOrder: PurchaseOrder;
   /**
+   * Exchange credentials for a session. Sets the access and refresh cookies.
+   *
+   * Fails with UNAUTHENTICATED and a deliberately vague message for both an
+   * unknown email and a wrong password.
+   */
+  login: AuthPayload;
+  /** Revokes this session everywhere it was rotated to, and clears the cookies. */
+  logout: Scalars['Boolean']['output'];
+  /**
    * Receive quantities against PO lines. Requires ADMIN or WAREHOUSE.
    *
    * Runs as one transaction: it appends a RECEIPT movement per line and
@@ -53,6 +80,14 @@ export type Mutation = {
    * of it does. Rejects over-receipt with an OVER_RECEIPT error.
    */
   receivePurchaseOrder: ReceivePurchaseOrderResult;
+  /**
+   * Exchange the refresh cookie for a new access token and a new refresh token.
+   *
+   * The presented refresh token is retired in the same transaction that issues
+   * its replacement. Presenting an already-retired token is treated as theft and
+   * revokes every session descended from that sign-in.
+   */
+  refreshSession: AuthPayload;
   /** Soft-deletes a purchase order. Requires ADMIN. Refuses once anything has been received. */
   voidPurchaseOrder: PurchaseOrder;
 };
@@ -60,6 +95,11 @@ export type Mutation = {
 
 export type MutationCreatePurchaseOrderArgs = {
   input: CreatePurchaseOrderInput;
+};
+
+
+export type MutationLoginArgs = {
+  input: LoginInput;
 };
 
 
@@ -129,13 +169,8 @@ export type PurchaseOrderStatus =
   | 'RECEIVED';
 
 export type Query = {
-  /**
-   * Dev-only. Lists the seeded users so the UI's role switcher can mint a token
-   * for each one and a reviewer can flip roles without a login screen. In a real
-   * deployment the IdP owns identity and this query does not exist.
-   */
-  demoUsers: Array<User>;
   locations: Array<Location>;
+  /** The signed-in user, or null when the request carries no valid access token. */
   me: Maybe<User>;
   products: Array<Product>;
   purchaseOrder: Maybe<PurchaseOrder>;
@@ -207,6 +242,10 @@ export type StockOnHand = {
   updatedAt: Scalars['DateTime']['output'];
 };
 
+/**
+ * A person who can sign in. Identity lives in this domain; purchasing references
+ * it for attribution (who raised a PO, who received stock).
+ */
 export type User = {
   email: Scalars['String']['output'];
   id: Scalars['ID']['output'];
@@ -247,10 +286,22 @@ export type MeQueryVariables = Exact<{ [key: string]: never; }>;
 
 export type MeQuery = { me: { id: string, name: string, email: string, role: Role } | null };
 
-export type DemoUsersQueryVariables = Exact<{ [key: string]: never; }>;
+export type LoginMutationVariables = Exact<{
+  input: LoginInput;
+}>;
 
 
-export type DemoUsersQuery = { demoUsers: Array<{ id: string, name: string, role: Role }> };
+export type LoginMutation = { login: { expiresIn: number, user: { id: string, name: string, email: string, role: Role } } };
+
+export type RefreshSessionMutationVariables = Exact<{ [key: string]: never; }>;
+
+
+export type RefreshSessionMutation = { refreshSession: { expiresIn: number, user: { id: string, name: string, email: string, role: Role } } };
+
+export type LogoutMutationVariables = Exact<{ [key: string]: never; }>;
+
+
+export type LogoutMutation = { logout: boolean };
 
 export type StockOnHandQueryVariables = Exact<{
   locationId?: InputMaybe<Scalars['ID']['input']>;

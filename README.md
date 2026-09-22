@@ -67,23 +67,23 @@ rows implied by their receipts:
 | PO-1003 | Shure | `RECEIVED` | Fully satisfied |
 | PO-1004 | Extron | `OPEN` | Second vendor, for the vendor filter |
 
-It also prints three bearer tokens, one per role. The API prints them again on boot when
-`DEV_AUTH_DEBUG=true`.
+It also creates three sign-ins, one per role, and prints them. The API prints them again on
+boot when `DEV_AUTH_DEBUG=true`.
 
 ### Signing in
 
-There is no login screen. The header has an **Acting as** switcher listing the three seeded
-users; picking one mints that user's bearer token into the Redux store, and RTK Query sends it
-on every subsequent request.
+Real authentication: password sign-in, a signed JWT access token, and a rotating
+refresh token. Sign in at <http://localhost:3000/login> with any seeded account — the
+password is the same for all three and is printed by `npm run seed`.
 
 | User | Role | Can |
 | --- | --- | --- |
-| Ada | `ADMIN` | Everything: create POs, receive, void |
-| Wes | `WAREHOUSE` | Receive stock |
-| Vic | `VIEWER` | Read only |
+| `ada@daas.test` | `ADMIN` | Everything: create POs, receive, void |
+| `wes@daas.test` | `WAREHOUSE` | Receive stock |
+| `vic@daas.test` | `VIEWER` | Read only |
 
-Switch to Vic and the **Receive stock** button goes disabled with a tooltip. Force it back on
-in devtools and the API still returns `FORBIDDEN` — the UI mirrors the rule, the server owns it.
+Sign in as Vic and the **Receive stock** button is disabled. Force it back on in devtools
+and the API still returns `FORBIDDEN` — the UI mirrors the rule, the server owns it.
 
 ### Verify
 
@@ -91,8 +91,8 @@ in devtools and the API still returns `FORBIDDEN` — the UI mirrors the rule, t
 cd api && npm test
 ```
 
-12 integration tests against a real Postgres. They create and migrate a separate `daas_test`
-database, so they never touch your seeded dev data.
+26 integration tests against a real Postgres — receiving, and the session lifecycle. They
+create and migrate a separate `daas_test` database, so they never touch your seeded dev data.
 
 ```bash
 npm run verify
@@ -128,16 +128,22 @@ api/
       resolvers.ts             #   auth + shape translation only
       service.ts               #   domain rules and transaction boundaries
       loaders.ts               #   per-request DataLoaders
-    shared/                    # auth, errors, prisma, id — cross-domain plumbing
+    domains/auth/              # identity: sign-in, rotation, cookies
+      service.ts               #   rotation and reuse detection
+      cookies.ts               #   httpOnly cookie shaping
+    shared/                    # auth, tokens, password, errors, prisma, id, env
     schema.ts                  # the only place domains are wired together
     index.ts
   tests/                       # integration tests against real Postgres
   scripts/check-ledger.ts
 web/
   src/
-    app/                       # App Router pages
-    components/                # AppShell, QueryState, forms, dialogs
-    lib/                       # RTK Query api, store, session, theme, operations
+    app/
+      login/                   # sign-in page, outside the guard
+      (app)/                   # everything behind a session
+      api/graphql/route.ts     # same-origin proxy that carries the cookies
+    components/                # AppShell, AuthGuard, QueryState, forms, dialogs
+    lib/                       # RTK Query api (+ silent refresh), store, session, theme
     generated/graphql.ts       # codegen output — types from the API's SDL
 ```
 
@@ -305,15 +311,53 @@ and line products is a fixed handful of queries rather than a few hundred.
 
 ### Auth
 
-A bearer token carrying a user id and a role:
+Two token types, deliberately different, both delivered as httpOnly cookies:
 
-```
-Authorization: Bearer daas_<base64url({"sub":"<uuid>","role":"WAREHOUSE"})>
-```
+| | Access | Refresh |
+| --- | --- | --- |
+| Format | JWT, HS256 | Opaque, 256 random bits |
+| Lifetime | 15 min | 30 days |
+| Server state | none — signature only | SHA-256 **hash** in `refresh_tokens` |
+| Revocable | no | yes |
 
-It is unsigned — a stand-in for a real IdP, not a security boundary. That is the deliberate
-scope cut; swapping it for a verified JWT means replacing `parseBearerToken` and nothing else,
-because every caller already goes through `requireRole`.
+The access token is stateless so the hot path costs no database round trip; that is
+exactly why it is short-lived, because a stateless token cannot be revoked. The refresh
+token is deliberately **not** a JWT: it has to be revocable, which makes it stateful
+regardless, so signing it would buy nothing. Only its hash is stored, for the same reason
+passwords are hashed — a dump of that table must not yield usable sessions.
+
+**Rotation with reuse detection.** Every refresh issues a new pair and retires the old
+one. Presenting an already-retired token means it leaked — the legitimate client holds
+the replacement — so the whole token *family* from that sign-in is revoked and both
+parties must sign in again. That detection is the entire reason rotation is worth doing;
+without it a stolen token simply works until it expires.
+
+Three details that are easy to get wrong, and are handled:
+
+- **The claim is a conditional `UPDATE`**, not read-then-write. Only one caller can find
+  `rotated_at IS NULL`, so concurrent refreshes cannot both succeed.
+- **Revocation happens outside any transaction that then throws.** Revoking the family
+  inside a transaction that rejects the caller would roll the revocation back — the
+  detection would fire and leave the stolen session working.
+- **The client single-flights refreshes behind a mutex.** Several queries expiring at
+  once would otherwise each fire a refresh, and the later ones would look exactly like
+  theft — the app would log the user out by itself.
+
+**Passwords** use scrypt from `node:crypto` (memory-hard, on OWASP's accepted list, no
+native build step). Parameters are stored with each hash so they can be raised later
+without invalidating existing passwords. Sign-in always runs a verification even for an
+unknown email, and returns an identical message for a wrong password and an unknown
+account, so the form is not an account-enumeration oracle.
+
+**Cookies never reach JavaScript.** The browser talks to a same-origin Next route handler
+at `/api/graphql`, which forwards to the API and relays `Set-Cookie` back. That keeps the
+cookies first-party — no CORS credential negotiation, `SameSite=Lax`, `Secure` in
+production — and means `document.cookie` is empty even to an XSS payload.
+
+**The accepted limitation:** an access token stays valid until it expires. Deactivating a
+user or changing a role takes effect within 15 minutes, not instantly. The fix, if that
+window mattered, is a `token_version` column checked per request, trading a little
+statelessness for immediate revocation.
 
 ---
 
@@ -370,10 +414,11 @@ npm run verify     # lint + typecheck
   different sign; adding them is a service function, not a schema change.
 - **Pagination.** The list is a plain query. At real volume it needs keyset pagination on the
   UUIDv7 primary key — which is part of why the ids are v7.
-- **Real auth.** See above.
-- **`demoUsers`.** An unauthenticated query that exists only to populate the role switcher. It
-  is the one thing in the schema I would delete before this shipped anywhere real, and it says
-  so in the SDL.
+- **Password reset, sign-up, MFA.** The session lifecycle is real — sign-in, rotation, reuse
+  detection, logout — but account management is not part of this slice. Seeded users only.
+- **A sessions screen.** `refresh_tokens` records the user agent and IP per family, so "your
+  active sessions, sign out that one" is a query away, and `revokeAllSessions` already exists.
+  There was no screen worth building for it here.
 - **Component tests.** I spent the test budget on integration tests for the transaction,
   concurrency and constraint behaviour, because that is where a bug would silently corrupt
   stock. The form logic is validated by zod schemas that are cheap to read and hard to get

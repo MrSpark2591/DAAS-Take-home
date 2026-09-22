@@ -26,15 +26,6 @@ export const resolvers = {
   DateTime: DateTimeResolver,
 
   Query: {
-    me: async (_p: unknown, _a: unknown, { actor, loaders }: Ctx) =>
-      actor ? loaders.userById.load(actor.id) : null,
-
-    // Intentionally unauthenticated: it is the bootstrap for the demo role
-    // switcher, and it is the one query that would be deleted before this
-    // shipped anywhere real.
-    demoUsers: (_p: unknown, _a: unknown, { db }: Ctx) =>
-      db.user.findMany({ where: live, orderBy: { role: 'asc' } }),
-
     /**
      * Status is derived, so filtering by it happens in the
      * `purchase_order_status` view rather than in application memory -- the

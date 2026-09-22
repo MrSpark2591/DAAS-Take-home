@@ -1,5 +1,5 @@
 import { PrismaClient } from '@prisma/client';
-import { mintToken } from '../src/shared/auth.js';
+import { hashPassword } from '../src/shared/password.js';
 
 /**
  * Seeds a reviewable dataset: three users (one per role), a handful of
@@ -17,20 +17,26 @@ async function main() {
   // Order matters for FKs; CASCADE handles the rest.
   await prisma.$executeRawUnsafe(`
     TRUNCATE TABLE
-      "stock_movements", "stock_on_hand", "purchase_order_lines",
+      "refresh_tokens", "stock_movements", "stock_on_hand", "purchase_order_lines",
       "purchase_orders", "products", "locations", "vendors", "users"
     RESTART IDENTITY CASCADE
   `);
 
+  // One password for all three seeded users: this is dev data, and a reviewer
+  // should not have to keep three of them straight. Hashed properly anyway, so
+  // the login path being exercised is the real one.
+  const password = process.env.SEED_PASSWORD ?? 'daas-dev-password';
+  const passwordHash = await hashPassword(password);
+
   const [admin, warehouse, viewer] = await Promise.all([
     prisma.user.create({
-      data: { email: 'ada@daas.test', name: 'Ada (Admin)', role: 'ADMIN' },
+      data: { email: 'ada@daas.test', name: 'Ada Admin', role: 'ADMIN', passwordHash },
     }),
     prisma.user.create({
-      data: { email: 'wes@daas.test', name: 'Wes (Warehouse)', role: 'WAREHOUSE' },
+      data: { email: 'wes@daas.test', name: 'Wes Warehouse', role: 'WAREHOUSE', passwordHash },
     }),
     prisma.user.create({
-      data: { email: 'vic@daas.test', name: 'Vic (Viewer)', role: 'VIEWER' },
+      data: { email: 'vic@daas.test', name: 'Vic Viewer', role: 'VIEWER', passwordHash },
     }),
   ]);
 
@@ -161,11 +167,11 @@ async function main() {
   }
 
   console.log('Seeded 3 users, 3 vendors, 5 products, 3 locations, 4 purchase orders.\n');
-  console.log('Bearer tokens for the UI role switcher and for GraphQL clients:\n');
+  console.log('Sign in at http://localhost:3000/login with any of:\n');
   for (const user of [admin, warehouse, viewer]) {
-    console.log(`  ${user.role.padEnd(9)} ${mintToken(user)}`);
+    console.log(`  ${user.role.padEnd(9)} ${user.email}`);
   }
-  console.log();
+  console.log(`\n  password: ${password}\n`);
 }
 
 main()

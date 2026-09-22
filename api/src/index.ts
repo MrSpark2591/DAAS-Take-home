@@ -47,7 +47,7 @@ const server = new ApolloServer<GraphQLContext>({
 
 const { url } = await startStandaloneServer(server, {
   listen: { port: PORT },
-  context: async ({ req }) => createContext({ req }),
+  context: async ({ req, res }) => createContext({ req, res }),
 });
 
 console.log(`DaaS API ready at ${url}`);
@@ -56,14 +56,14 @@ if (process.env.DEV_AUTH_DEBUG === 'true') {
   const users = await prisma.user.findMany({
     where: { deletedAt: null },
     orderBy: { role: 'asc' },
+    select: { email: true, role: true },
   });
   if (users.length > 0) {
-    const { mintToken } = await import('./shared/auth.js');
-    console.log('\nSeeded bearer tokens (dev only):');
+    console.log('\nSeeded sign-ins (dev only) — password is the same for all:');
     for (const user of users) {
-      console.log(`  ${user.role.padEnd(9)} ${user.name.padEnd(16)} ${mintToken(user)}`);
+      console.log(`  ${user.role.padEnd(9)} ${user.email}`);
     }
-    console.log();
+    console.log(`  password: ${process.env.SEED_PASSWORD ?? 'daas-dev-password'}\n`);
   }
 }
 

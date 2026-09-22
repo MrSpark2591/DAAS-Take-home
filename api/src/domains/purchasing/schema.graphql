@@ -1,11 +1,5 @@
 scalar DateTime
 
-enum Role {
-  ADMIN
-  WAREHOUSE
-  VIEWER
-}
-
 enum MovementType {
   RECEIPT
   ADJUSTMENT
@@ -22,13 +16,6 @@ enum PurchaseOrderStatus {
   OPEN
   PARTIAL
   RECEIVED
-}
-
-type User {
-  id: ID!
-  name: String!
-  email: String!
-  role: Role!
 }
 
 type Vendor {
@@ -147,14 +134,6 @@ type ReceivePurchaseOrderResult {
 }
 
 type Query {
-  me: User
-
-  """
-  Dev-only. Lists the seeded users so the UI's role switcher can mint a token
-  for each one and a reviewer can flip roles without a login screen. In a real
-  deployment the IdP owns identity and this query does not exist.
-  """
-  demoUsers: [User!]!
   purchaseOrders(filter: PurchaseOrderFilter): [PurchaseOrder!]!
   purchaseOrder(id: ID!): PurchaseOrder
   vendors: [Vendor!]!

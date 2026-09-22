@@ -1,0 +1,21 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: daas_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: daas
+      POSTGRES_PASSWORD: daas
+      POSTGRES_DB: daas
+    ports:
+      - '5432:5432'
+    volumes:
+      - daas_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U daas -d daas']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  daas_pgdata:

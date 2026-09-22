@@ -1,0 +1,4 @@
+{
+  "recommendations": ["biomejs.biome", "Prisma.prisma", "GraphQL.vscode-graphql"],
+  "unwantedRecommendations": ["esbenp.prettier-vscode", "dbaeumer.vscode-eslint"]
+}

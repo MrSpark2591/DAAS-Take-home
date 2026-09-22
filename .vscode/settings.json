@@ -1,0 +1,40 @@
+{
+  // Biome owns formatting and linting. Without this, the editor's built-in
+  // formatter rewrites files on save (double quotes, different wrapping) and
+  // every save fights `npm run lint`.
+  "editor.defaultFormatter": "biomejs.biome",
+  "editor.formatOnSave": true,
+  "editor.codeActionsOnSave": {
+    "source.fixAll.biome": "explicit",
+    "source.organizeImports.biome": "explicit"
+  },
+
+  "[typescript]": { "editor.defaultFormatter": "biomejs.biome" },
+  "[typescriptreact]": { "editor.defaultFormatter": "biomejs.biome" },
+  "[javascript]": { "editor.defaultFormatter": "biomejs.biome" },
+  "[json]": { "editor.defaultFormatter": "biomejs.biome" },
+  "[jsonc]": { "editor.defaultFormatter": "biomejs.biome" },
+
+  // Prettier and ESLint are not used here; disable them if they are installed
+  // globally so they cannot re-format on save.
+  "prettier.enable": false,
+  "eslint.enable": false,
+
+  // Use the TypeScript version from the workspace rather than the one bundled
+  // with the editor, so the editor and `npm run typecheck` agree.
+  "typescript.tsdk": "web/node_modules/typescript/lib",
+  "typescript.enablePromptUseWorkspaceTsdk": true,
+
+  // Generated output — noise in search and in the file watcher.
+  "files.watcherExclude": {
+    "**/node_modules/**": true,
+    "**/.next/**": true,
+    "**/dist/**": true
+  },
+  "search.exclude": {
+    "**/node_modules": true,
+    "**/.next": true,
+    "**/dist": true,
+    "web/src/generated": true
+  }
+}

@@ -15,7 +15,8 @@
       "!**/generated",
       "!web/src/generated",
       "!api/prisma/migrations",
-      "!web/next-env.d.ts"
+      "!web/next-env.d.ts",
+      "!.vscode"
     ]
   },
   "formatter": {

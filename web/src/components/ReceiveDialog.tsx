@@ -44,6 +44,12 @@ export function ReceiveDialog({ open, onClose, purchaseOrder }: ReceiveDialogPro
   const options = useFormOptionsQuery();
   const [receive, receiveState] = useReceivePurchaseOrderMutation();
 
+  // The form seeds locationId from the PO, which is known immediately, while the
+  // location list arrives a request later. Falling back to the PO's own location
+  // keeps the Select's value in range for that gap -- otherwise MUI renders an
+  // empty box and warns about an out-of-range value.
+  const locationOptions = options.data?.locations ?? [purchaseOrder.location];
+
   const schema = buildSchema(outstanding);
   type FormValues = z.input<typeof schema>;
   type ParsedValues = z.output<typeof schema>;
@@ -120,7 +126,7 @@ export function ReceiveDialog({ open, onClose, purchaseOrder }: ReceiveDialogPro
                   fullWidth
                   helperText="Defaults to the order's location. Override for an overflow delivery."
                 >
-                  {(options.data?.locations ?? []).map((location) => (
+                  {locationOptions.map((location) => (
                     <MenuItem key={location.id} value={location.id}>
                       {location.code} — {location.name}
                     </MenuItem>

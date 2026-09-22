@@ -15,7 +15,13 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="en" className={`${geistSans.variable} ${geistMono.variable}`}>
-      <body>
+      {/*
+        Browser extensions (ColorZilla, Grammarly and friends) inject attributes
+        onto <body> before React hydrates, which React reports as a mismatch.
+        This suppresses the diff for this element's own attributes only --
+        mismatches inside the app still surface normally.
+      */}
+      <body suppressHydrationWarning>
         <Providers>
           <AppShell>{children}</AppShell>
         </Providers>

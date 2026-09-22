@@ -1,0 +1,211 @@
+// DaaS — Sprint 2 slice: purchase order receiving.
+//
+// Conventions applied to every table:
+//   - uuid primary key, generated as UUIDv7 so ids sort by creation time
+//   - created_at / updated_at on every mutable table
+//   - soft delete via deleted_at
+//
+// Two tables deliberately break the soft-delete convention, and the README
+// architecture note explains why:
+//   - stock_movements is an append-only ledger. A movement is a historical
+//     fact; you reverse it with a compensating movement, you never delete it.
+//   - stock_on_hand is a derived projection of that ledger, keyed by
+//     (product, location). It is a cache, so there is nothing to soft delete.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ADMIN
+  WAREHOUSE
+  VIEWER
+
+  @@map("role")
+}
+
+enum MovementType {
+  RECEIPT
+  ADJUSTMENT
+  TRANSFER_IN
+  TRANSFER_OUT
+  ALLOCATION
+
+  @@map("movement_type")
+}
+
+model User {
+  id    String @id @default(uuid(7)) @db.Uuid
+  email String @db.VarChar(320)
+  name  String @db.VarChar(120)
+  role  Role
+
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(6)
+
+  purchaseOrders PurchaseOrder[]
+  stockMovements StockMovement[]
+
+  @@map("users")
+}
+
+model Vendor {
+  id   String  @id @default(uuid(7)) @db.Uuid
+  code String  @db.VarChar(32)
+  name String  @db.VarChar(160)
+  email String? @db.VarChar(320)
+
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(6)
+
+  purchaseOrders PurchaseOrder[]
+
+  @@map("vendors")
+}
+
+model Product {
+  id   String @id @default(uuid(7)) @db.Uuid
+  sku  String @db.VarChar(64)
+  name String @db.VarChar(200)
+  // Unit of measure. Receiving is whole units only, so quantities are integers.
+  unit String @default("ea") @db.VarChar(16)
+
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(6)
+
+  purchaseOrderLines PurchaseOrderLine[]
+  stockMovements     StockMovement[]
+  stockOnHand        StockOnHand[]
+
+  @@map("products")
+}
+
+model Location {
+  id   String @id @default(uuid(7)) @db.Uuid
+  code String @db.VarChar(32)
+  name String @db.VarChar(160)
+
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(6)
+
+  purchaseOrders PurchaseOrder[]
+  stockMovements StockMovement[]
+  stockOnHand    StockOnHand[]
+
+  @@map("locations")
+}
+
+/// A purchase order header.
+///
+/// There is no `status` column on purpose. Status is OPEN / PARTIAL / RECEIVED
+/// derived from how much of each line has been received, and it is computed by
+/// the `purchase_order_status` SQL view. A stored flag would let the header and
+/// the ledger disagree; a view cannot.
+model PurchaseOrder {
+  id         String  @id @default(uuid(7)) @db.Uuid
+  poNumber   String  @map("po_number") @db.VarChar(32)
+  vendorId   String  @map("vendor_id") @db.Uuid
+  /// Default receiving location for the order. A receipt may override it
+  /// per call, which is what makes multi-location receiving possible later.
+  locationId String  @map("location_id") @db.Uuid
+  notes      String? @db.VarChar(2000)
+  createdById String @map("created_by_id") @db.Uuid
+
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(6)
+
+  vendor    Vendor              @relation(fields: [vendorId], references: [id], onDelete: Restrict)
+  location  Location            @relation(fields: [locationId], references: [id], onDelete: Restrict)
+  createdBy User                @relation(fields: [createdById], references: [id], onDelete: Restrict)
+  lines     PurchaseOrderLine[]
+
+  @@index([vendorId])
+  @@index([locationId])
+  @@map("purchase_orders")
+}
+
+/// One product on a purchase order.
+///
+/// `quantityReceived` is NOT a column. It is SUM(stock_movements.quantity) for
+/// RECEIPT movements pointing at this line, exposed by the
+/// `purchase_order_line_totals` view.
+model PurchaseOrderLine {
+  id              String @id @default(uuid(7)) @db.Uuid
+  purchaseOrderId String @map("purchase_order_id") @db.Uuid
+  productId       String @map("product_id") @db.Uuid
+  quantityOrdered Int    @map("quantity_ordered")
+  /// Money as integer cents. Never floats.
+  unitCostCents   Int    @map("unit_cost_cents")
+
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(6)
+
+  purchaseOrder PurchaseOrder   @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+  product       Product         @relation(fields: [productId], references: [id], onDelete: Restrict)
+  movements     StockMovement[]
+
+  @@index([purchaseOrderId])
+  @@index([productId])
+  @@map("purchase_order_lines")
+}
+
+/// Append-only stock ledger. Every change to on-hand quantity, from any sprint
+/// (receive, adjust, transfer, allocate), lands here first as a signed row.
+/// No updated_at, no deleted_at: rows are immutable.
+model StockMovement {
+  id         String       @id @default(uuid(7)) @db.Uuid
+  productId  String       @map("product_id") @db.Uuid
+  locationId String       @map("location_id") @db.Uuid
+  /// Signed. Positive adds to on-hand, negative removes.
+  quantity   Int
+  type       MovementType
+  /// Set when the movement came from receiving a PO line. Nullable because
+  /// adjustments and transfers have no PO behind them.
+  purchaseOrderLineId String? @map("purchase_order_line_id") @db.Uuid
+  reason     String?      @db.VarChar(500)
+  createdById String      @map("created_by_id") @db.Uuid
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  product           Product            @relation(fields: [productId], references: [id], onDelete: Restrict)
+  location          Location           @relation(fields: [locationId], references: [id], onDelete: Restrict)
+  purchaseOrderLine PurchaseOrderLine? @relation(fields: [purchaseOrderLineId], references: [id], onDelete: Restrict)
+  createdBy         User               @relation(fields: [createdById], references: [id], onDelete: Restrict)
+
+  @@index([productId, locationId])
+  @@index([purchaseOrderLineId])
+  @@index([createdAt])
+  @@map("stock_movements")
+}
+
+/// Running on-hand quantity per (product, location), maintained in the same
+/// transaction as the movement that changed it. A projection of the ledger:
+/// SUM(stock_movements.quantity) GROUP BY product, location must always equal
+/// this table, and `npm run check:ledger` asserts exactly that.
+model StockOnHand {
+  id         String @id @default(uuid(7)) @db.Uuid
+  productId  String @map("product_id") @db.Uuid
+  locationId String @map("location_id") @db.Uuid
+  quantity   Int    @default(0)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  product  Product  @relation(fields: [productId], references: [id], onDelete: Restrict)
+  location Location @relation(fields: [locationId], references: [id], onDelete: Restrict)
+
+  @@unique([productId, locationId], map: "stock_on_hand_product_location_key")
+  @@index([locationId])
+  @@map("stock_on_hand")
+}

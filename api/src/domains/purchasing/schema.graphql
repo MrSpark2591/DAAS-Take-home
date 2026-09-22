@@ -1,0 +1,182 @@
+scalar DateTime
+
+enum Role {
+  ADMIN
+  WAREHOUSE
+  VIEWER
+}
+
+enum MovementType {
+  RECEIPT
+  ADJUSTMENT
+  TRANSFER_IN
+  TRANSFER_OUT
+  ALLOCATION
+}
+
+"""
+Derived from received quantities, never stored. A PO with nothing received is
+OPEN, one fully satisfied is RECEIVED, anything in between is PARTIAL.
+"""
+enum PurchaseOrderStatus {
+  OPEN
+  PARTIAL
+  RECEIVED
+}
+
+type User {
+  id: ID!
+  name: String!
+  email: String!
+  role: Role!
+}
+
+type Vendor {
+  id: ID!
+  code: String!
+  name: String!
+  email: String
+}
+
+type Product {
+  id: ID!
+  sku: String!
+  name: String!
+  unit: String!
+  "On-hand quantity per location for this product."
+  stockOnHand: [StockOnHand!]!
+}
+
+type Location {
+  id: ID!
+  code: String!
+  name: String!
+}
+
+type StockOnHand {
+  id: ID!
+  product: Product!
+  location: Location!
+  quantity: Int!
+  updatedAt: DateTime!
+}
+
+"A single immutable entry in the stock ledger."
+type StockMovement {
+  id: ID!
+  product: Product!
+  location: Location!
+  "Signed. Positive adds to on-hand, negative removes."
+  quantity: Int!
+  type: MovementType!
+  reason: String
+  createdBy: User!
+  createdAt: DateTime!
+}
+
+type PurchaseOrderLine {
+  id: ID!
+  product: Product!
+  quantityOrdered: Int!
+  "SUM of RECEIPT movements against this line. Computed, not stored."
+  quantityReceived: Int!
+  "quantityOrdered - quantityReceived, floored at zero."
+  quantityOutstanding: Int!
+  unitCostCents: Int!
+  "unitCostCents * quantityOrdered."
+  lineTotalCents: Int!
+  "Receipt history for this line, newest first."
+  receipts: [StockMovement!]!
+}
+
+type PurchaseOrder {
+  id: ID!
+  poNumber: String!
+  vendor: Vendor!
+  "Default receiving location. A receipt may override it."
+  location: Location!
+  status: PurchaseOrderStatus!
+  lines: [PurchaseOrderLine!]!
+  totalOrdered: Int!
+  totalReceived: Int!
+  "Sum of all line totals."
+  totalCostCents: Int!
+  notes: String
+  createdBy: User!
+  createdAt: DateTime!
+  updatedAt: DateTime!
+}
+
+input PurchaseOrderFilter {
+  status: PurchaseOrderStatus
+  vendorId: ID
+}
+
+input CreatePurchaseOrderLineInput {
+  productId: ID!
+  quantityOrdered: Int!
+  unitCostCents: Int!
+}
+
+input CreatePurchaseOrderInput {
+  poNumber: String!
+  vendorId: ID!
+  locationId: ID!
+  notes: String
+  lines: [CreatePurchaseOrderLineInput!]!
+}
+
+input ReceiveLineInput {
+  purchaseOrderLineId: ID!
+  "Must be positive and cannot exceed the line's outstanding quantity."
+  quantity: Int!
+}
+
+input ReceivePurchaseOrderInput {
+  purchaseOrderId: ID!
+  "Overrides the PO's default receiving location for this receipt."
+  locationId: ID
+  lines: [ReceiveLineInput!]!
+  reason: String
+}
+
+type ReceivePurchaseOrderResult {
+  purchaseOrder: PurchaseOrder!
+  "The ledger rows this receipt created."
+  movements: [StockMovement!]!
+}
+
+type Query {
+  me: User
+
+  """
+  Dev-only. Lists the seeded users so the UI's role switcher can mint a token
+  for each one and a reviewer can flip roles without a login screen. In a real
+  deployment the IdP owns identity and this query does not exist.
+  """
+  demoUsers: [User!]!
+  purchaseOrders(filter: PurchaseOrderFilter): [PurchaseOrder!]!
+  purchaseOrder(id: ID!): PurchaseOrder
+  vendors: [Vendor!]!
+  products: [Product!]!
+  locations: [Location!]!
+  "On-hand stock across every product/location pair, optionally narrowed."
+  stockOnHand(locationId: ID, productId: ID): [StockOnHand!]!
+}
+
+type Mutation {
+  "Requires ADMIN."
+  createPurchaseOrder(input: CreatePurchaseOrderInput!): PurchaseOrder!
+
+  """
+  Receive quantities against PO lines. Requires ADMIN or WAREHOUSE.
+
+  Runs as one transaction: it appends a RECEIPT movement per line and
+  increments the matching on-hand row. Either the whole receipt lands or none
+  of it does. Rejects over-receipt with an OVER_RECEIPT error.
+  """
+  receivePurchaseOrder(input: ReceivePurchaseOrderInput!): ReceivePurchaseOrderResult!
+
+  "Soft-deletes a purchase order. Requires ADMIN. Refuses once anything has been received."
+  voidPurchaseOrder(id: ID!): PurchaseOrder!
+}

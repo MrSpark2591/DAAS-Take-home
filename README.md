@@ -12,27 +12,48 @@ Next.js 16 (App Router) · MUI 9 · Redux Toolkit + RTK Query · react-hook-form
 
 ## Quick start
 
-Four commands from a clean checkout. Postgres comes from Docker; nothing else is assumed.
+Three commands from a clean checkout. Postgres comes from Docker; nothing else is assumed.
 
 ```bash
-docker compose up -d
+cp api/.env.example api/.env && cp web/.env.example web/.env.local
 ```
 
 ```bash
-cd api && cp .env.example .env && npm install && npx prisma migrate deploy && npm run seed && npm run dev
+npm install && npm run setup
+```
+
+`setup` installs both packages, generates the Prisma client, starts Postgres and waits for it
+to pass its healthcheck, applies the migration, and seeds.
+
+```bash
+npm run dev
+```
+
+That runs the API and the web app **together**, with prefixed, colour-coded output:
+
+```
+[api] DaaS API ready at http://localhost:4000/
+[web] ▲ Next.js 16.3.5   - Local: http://localhost:3000
+```
+
+Open <http://localhost:3000>. Ctrl-C stops both; if either process dies, the other is shut down
+with it rather than left orphaned holding a port.
+
+### Running them separately
+
+Sometimes you want one service's logs on their own — restarting the API without bouncing the
+Next dev server, or attaching a debugger:
+
+```bash
+npm run dev:api    # or: cd api && npm run dev
 ```
 
 ```bash
-cd web && cp .env.example .env.local && npm install && npm run dev
+npm run dev:web    # or: cd web && npm run dev
 ```
 
-Open <http://localhost:3000>. The API is on <http://localhost:4000>.
-
-Optional, for the repo-wide lint/format and the git hook:
-
-```bash
-npm install
-```
+Both read the same `.env` files, so they behave identically either way. `npm run db:up` and
+`npm run db:down` control Postgres on its own.
 
 ### What the seed gives you
 

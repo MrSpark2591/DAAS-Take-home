@@ -28,20 +28,26 @@ Node 24 is required (`.nvmrc`, `engines`).
 Always run these from the directory shown.
 
 ```bash
-docker compose up -d                 # root — start Postgres first, everything needs it
+npm run setup     # root — install both packages, start Postgres, migrate, seed
+npm run dev       # root — API and web together, prefixed output, Ctrl-C stops both
 ```
 
 | Directory | Command | Purpose |
 | --- | --- | --- |
+| root | `npm run dev` | **Both services in parallel.** Use this by default. |
+| root | `npm run dev:api` / `dev:web` | One service alone, when you want its logs isolated |
+| root | `npm run db:up` / `db:down` | Postgres only |
 | root | `npm run verify` | Lint + typecheck both packages. **Run before claiming done.** |
 | root | `npm run lint:fix` | Biome check + autofix |
-| `api/` | `npm run dev` | API on :4000, prints seeded bearer tokens |
+| root | `npm test` | Delegates to the api suite |
 | `api/` | `npm test` | Integration tests against real Postgres |
 | `api/` | `npm run seed` | Reset and reseed dev data (truncates first) |
 | `api/` | `npm run db:reset` | Drop, re-migrate, reseed |
 | `api/` | `npm run check:ledger` | Assert on-hand matches the movement ledger |
-| `web/` | `npm run dev` | UI on :3000 |
 | `web/` | `npm run codegen` | Regenerate types from the API's SDL |
+
+`npm run dev` uses `--kill-others-on-fail`, so a crash in one service stops the other instead
+of leaving a half-running stack and an occupied port.
 
 ---
 
@@ -153,6 +159,22 @@ Gotcha: Vitest loads `api/.env` into `process.env`, which is why the test databa
 Do not read `process.env.DATABASE_URL` in test setup code — you will get the dev database.
 
 ---
+
+## Dependency gotchas
+
+- **`prisma generate` runs from `api`'s `postinstall`.** npm 11 blocks dependency install
+  scripts by default, so Prisma's own postinstall may not fire; ours does, because a package's
+  own scripts still run. If you ever see *"@prisma/client did not initialize yet"*, run
+  `npm --prefix api run prisma:generate`.
+- **`api/prisma.config.ts` replaces the deprecated `package.json#prisma` block.** Having it
+  switches off Prisma's automatic `.env` loading, which is why the file loads `.env` itself —
+  and why it only does so when `DATABASE_URL` is not already set, so the test global-setup can
+  still point the CLI at `daas_test`.
+- **Two `overrides` exist and both are deliberate**, each with a comment saying why:
+  `deepmerge-ts` in `api/` and `lodash` in `web/`. Both patch advisories in build-time tooling
+  that upstream has not fixed in a usable release. Re-check them before upgrading Prisma or
+  GraphQL Codegen; if upstream has caught up, delete the override rather than carrying it.
+- **Keep `npm audit` clean** in all three packages. It is currently at zero.
 
 ## Style
 

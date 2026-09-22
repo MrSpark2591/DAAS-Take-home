@@ -14,7 +14,8 @@
       "!**/coverage",
       "!**/generated",
       "!web/src/generated",
-      "!api/prisma/migrations"
+      "!api/prisma/migrations",
+      "!web/next-env.d.ts"
     ]
   },
   "formatter": {
@@ -32,7 +33,6 @@
     },
     "rules": {
       "preset": "recommended",
-
       "correctness": {
         "noUnusedImports": "error",
         "noUnusedVariables": "error",
@@ -41,18 +41,21 @@
         "useExhaustiveDependencies": "error",
         "noUndeclaredVariables": "error"
       },
-
       "suspicious": {
         "noExplicitAny": "error",
         "noDoubleEquals": "error",
-        "noConsole": { "level": "warn", "options": { "allow": ["error", "warn", "info", "log"] } },
+        "noConsole": {
+          "level": "warn",
+          "options": {
+            "allow": ["error", "warn", "info", "log"]
+          }
+        },
         "noArrayIndexKey": "error",
         "noMisplacedAssertion": "error",
         "useAwait": "error",
         "useErrorMessage": "error",
         "useNumberToFixedDigitsArgument": "error"
       },
-
       "style": {
         "noNonNullAssertion": "off",
         "useImportType": "error",
@@ -70,15 +73,34 @@
           "options": {
             "strictCase": false,
             "conventions": [
-              { "selector": { "kind": "typeLike" }, "formats": ["PascalCase"] },
-              { "selector": { "kind": "function" }, "formats": ["camelCase", "PascalCase"] },
-              { "selector": { "kind": "typeProperty" }, "match": ".*" },
-              { "selector": { "kind": "objectLiteralProperty" }, "match": ".*" }
+              {
+                "selector": {
+                  "kind": "typeLike"
+                },
+                "formats": ["PascalCase"]
+              },
+              {
+                "selector": {
+                  "kind": "function"
+                },
+                "formats": ["camelCase", "PascalCase"]
+              },
+              {
+                "selector": {
+                  "kind": "typeProperty"
+                },
+                "match": ".*"
+              },
+              {
+                "selector": {
+                  "kind": "objectLiteralProperty"
+                },
+                "match": ".*"
+              }
             ]
           }
         }
       },
-
       "complexity": {
         "noUselessTernary": "error",
         "noForEach": "off",
@@ -86,24 +108,22 @@
         "useFlatMap": "error",
         "noExcessiveCognitiveComplexity": {
           "level": "warn",
-          "options": { "maxAllowedComplexity": 20 }
+          "options": {
+            "maxAllowedComplexity": 20
+          }
         }
       },
-
       "performance": {
         "noDelete": "error",
         "noAccumulatingSpread": "error"
       },
-
       "security": {
         "noDangerouslySetInnerHtml": "error",
         "noGlobalEval": "error"
       },
-
       "a11y": {
         "recommended": true
       },
-
       "nursery": {
         "recommended": false
       }

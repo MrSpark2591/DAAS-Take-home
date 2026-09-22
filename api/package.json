@@ -7,6 +7,7 @@
     "node": ">=24"
   },
   "scripts": {
+    "postinstall": "prisma generate",
     "dev": "tsx watch src/index.ts",
     "build": "tsc -p tsconfig.json && node scripts/copy-sdl.mjs",
     "start": "node dist/src/index.js",
@@ -19,9 +20,6 @@
     "check:ledger": "tsx scripts/check-ledger.ts",
     "test": "vitest run",
     "test:watch": "vitest"
-  },
-  "prisma": {
-    "seed": "tsx prisma/seed.ts"
   },
   "dependencies": {
     "@apollo/server": "^5.0.0",
@@ -36,6 +34,9 @@
     "prisma": "^6.16.2",
     "tsx": "^4.19.3",
     "typescript": "^5.7.3",
-    "vitest": "^2.1.9"
+    "vitest": "^5.0.1"
+  },
+  "overrides": {
+    "deepmerge-ts": "^8.0.2"
   }
 }

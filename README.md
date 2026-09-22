@@ -85,6 +85,12 @@ cd api && npm run check:ledger
 
 Asserts the invariant the stock design rests on — see the architecture note below.
 
+### Demo
+
+[`docs/demo.md`](docs/demo.md) has every GraphQL operation the UI sends, the three
+responses worth seeing from the receive mutation (success, over-receipt, forbidden), and a
+seven-step walkthrough.
+
 ---
 
 ## Layout

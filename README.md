@@ -718,8 +718,6 @@ npm run verify     # lint + typecheck
 - **Adjust, transfer and allocate.** The ledger models all four movement types and the enum
   lists them, but only `RECEIPT` has a mutation. The others are the same two writes with a
   different sign; adding them is a service function, not a schema change.
-- **Pagination.** The list is a plain query. At real volume it needs keyset pagination on the
-  UUIDv7 primary key — which is part of why the ids are v7.
 - **Password reset, sign-up, MFA.** The session lifecycle is real — sign-in, rotation, reuse
   detection, logout — but account management is not part of this slice. Seeded users only.
 - **A sessions screen.** `refresh_tokens` records the user agent and IP per family, so "your

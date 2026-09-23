@@ -81,6 +81,73 @@ behind it.
 
 ---
 
+# Architecture note
+
+> **Making stock movements transactional and auditable across adjust, transfer, receive and
+> allocate.**
+
+## The design
+
+Every change to stock is an append-only row in `stock_movements`: a signed quantity, a type
+(`RECEIPT`, `ADJUSTMENT`, `TRANSFER_IN/OUT`, `ALLOCATION`), a product, a location, who did it
+and when. Movements are never updated or deleted — the table has no `updated_at` and no
+`deleted_at`, deliberately breaking the repo's own soft-delete convention. You reverse a
+movement by appending a compensating one, so the history of a mistake is preserved rather than
+edited away.
+
+`stock_on_hand` is a projection of that ledger, one row per `(product, location)`, written in
+the **same transaction** as the movement that changed it. Reads are a single indexed lookup
+instead of an aggregate over the whole ledger, but the ledger stays the source of truth.
+
+Nothing about that is receive-specific. Sprint 2's adjustments and transfers, and sprint 4's
+RMA returns, are all "append a movement, move the projection" — the same two writes in the same
+transaction, differing only in sign and type.
+
+Derived state is computed in SQL views rather than stored:
+
+- `purchase_order_line_totals` — received and outstanding per line, from the ledger.
+- `purchase_order_status` — `OPEN` / `PARTIAL` / `RECEIVED` per order, from those totals.
+
+So a PO has **no status column**. The list filter queries the view, which means filtering
+stays a single indexed query rather than fetching everything and filtering in memory, and
+there is no flag that can drift from the ledger.
+
+## The main trade-off
+
+**The projection is denormalised, and denormalised data can drift.** I accepted that cost for
+O(1) on-hand reads, and paid for it three ways:
+
+1. The projection is only ever written inside the same transaction as its movement.
+2. `stock_on_hand.quantity >= 0` is a check constraint, so a bad write fails in the database
+   rather than silently producing negative stock.
+3. `npm run check:ledger` re-derives on-hand from the ledger and diffs it against the
+   projection. It is asserted in the integration tests and is the obvious nightly job in
+   production.
+
+The alternative — deriving on-hand from `SUM(movements)` on every read — cannot drift, but
+turns the most common query in the system into an aggregate over a table that only ever grows.
+That trade flips at a scale this slice is not at; when it does, the fix is a materialised view
+refreshed on write, and the check script becomes the thing that validates the migration.
+
+Two smaller calls worth naming:
+
+- **Concurrency.** The receive transaction takes `SELECT … FOR UPDATE` on the PO row before
+  reading outstanding quantities. Without it, two people receiving the last item both read
+  "1 outstanding" and both write. The lock is per-order, so receipts against different POs stay
+  fully concurrent. There is a test for exactly this race.
+- **The on-hand upsert is raw `INSERT … ON CONFLICT`,** not `prisma.upsert`. Prisma's upsert is
+  a read-then-write that can still collide when two transactions create the first on-hand row
+  for the same `(product, location)`; `ON CONFLICT` is one atomic statement.
+
+## What I would ship first
+
+The audit trail, before the projection. `stock_movements` plus the views is a complete,
+correct system on its own — slower to read, impossible to corrupt. `stock_on_hand` is an
+optimisation, and optimisations should land second, behind the check script that proves they
+agree.
+
+---
+
 # Design decisions
 
 The three things worth arguing about: how identity is proved, how access is decided, and
@@ -400,73 +467,6 @@ server decides what is permitted. Re-enabling a disabled button in devtools stil
 ---
 
 # Implementation notes
-
----
-
-## Architecture note
-
-> **Making stock movements transactional and auditable across adjust, transfer, receive and
-> allocate.**
-
-### The design
-
-Every change to stock is an append-only row in `stock_movements`: a signed quantity, a type
-(`RECEIPT`, `ADJUSTMENT`, `TRANSFER_IN/OUT`, `ALLOCATION`), a product, a location, who did it
-and when. Movements are never updated or deleted — the table has no `updated_at` and no
-`deleted_at`, deliberately breaking the repo's own soft-delete convention. You reverse a
-movement by appending a compensating one, so the history of a mistake is preserved rather than
-edited away.
-
-`stock_on_hand` is a projection of that ledger, one row per `(product, location)`, written in
-the **same transaction** as the movement that changed it. Reads are a single indexed lookup
-instead of an aggregate over the whole ledger, but the ledger stays the source of truth.
-
-Nothing about that is receive-specific. Sprint 2's adjustments and transfers, and sprint 4's
-RMA returns, are all "append a movement, move the projection" — the same two writes in the same
-transaction, differing only in sign and type.
-
-Derived state is computed in SQL views rather than stored:
-
-- `purchase_order_line_totals` — received and outstanding per line, from the ledger.
-- `purchase_order_status` — `OPEN` / `PARTIAL` / `RECEIVED` per order, from those totals.
-
-So a PO has **no status column**. The list filter queries the view, which means filtering
-stays a single indexed query rather than fetching everything and filtering in memory, and
-there is no flag that can drift from the ledger.
-
-### The main trade-off
-
-**The projection is denormalised, and denormalised data can drift.** I accepted that cost for
-O(1) on-hand reads, and paid for it three ways:
-
-1. The projection is only ever written inside the same transaction as its movement.
-2. `stock_on_hand.quantity >= 0` is a check constraint, so a bad write fails in the database
-   rather than silently producing negative stock.
-3. `npm run check:ledger` re-derives on-hand from the ledger and diffs it against the
-   projection. It is asserted in the integration tests and is the obvious nightly job in
-   production.
-
-The alternative — deriving on-hand from `SUM(movements)` on every read — cannot drift, but
-turns the most common query in the system into an aggregate over a table that only ever grows.
-That trade flips at a scale this slice is not at; when it does, the fix is a materialised view
-refreshed on write, and the check script becomes the thing that validates the migration.
-
-Two smaller calls worth naming:
-
-- **Concurrency.** The receive transaction takes `SELECT … FOR UPDATE` on the PO row before
-  reading outstanding quantities. Without it, two people receiving the last item both read
-  "1 outstanding" and both write. The lock is per-order, so receipts against different POs stay
-  fully concurrent. There is a test for exactly this race.
-- **The on-hand upsert is raw `INSERT … ON CONFLICT`,** not `prisma.upsert`. Prisma's upsert is
-  a read-then-write that can still collide when two transactions create the first on-hand row
-  for the same `(product, location)`; `ON CONFLICT` is one atomic statement.
-
-### What I would ship first
-
-The audit trail, before the projection. `stock_movements` plus the views is a complete,
-correct system on its own — slower to read, impossible to corrupt. `stock_on_hand` is an
-optimisation, and optimisations should land second, behind the check script that proves they
-agree.
 
 ---
 

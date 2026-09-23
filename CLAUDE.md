@@ -93,13 +93,29 @@ locking logic is the part worth reusing.
 
 ### Authorisation
 
-All role checks go through `requireRole` in `api/src/shared/auth.ts`, using the named role sets
-(`CAN_RECEIVE_STOCK`, `CAN_MANAGE_PURCHASE_ORDERS`). Do not read `actor.role` directly in a
-resolver — one gate means one place to audit.
+**Permissions are the unit of authorisation. Roles are just named bundles of
+them, and nothing in the codebase branches on a role key.** If you find yourself
+writing `role === 'warehouse'`, stop — that is the coupling this design removes.
 
-The UI mirrors these rules via `canReceiveStock` / `canManagePurchaseOrders` in
-`web/src/lib/session.ts`. **The UI copy is cosmetic.** Adding a client-side check is never a
-substitute for the server-side one.
+- The catalogue lives in `api/src/shared/permissions.ts` and is the source of
+  truth: the application can only check permissions it knows at compile time.
+  Adding one means adding it there *and* inserting the row in a migration.
+- Which permissions a role grants is **data**, editable at runtime. Inventing a
+  "goods-in" role that grants `stock:receive` must work with no code change —
+  there is a test asserting exactly that.
+- Every check goes through `requirePermission` (or `requireAllPermissions`) in
+  `api/src/shared/auth.ts`. Do not read `actor.permissions` directly in a
+  resolver; one gate means one place to audit.
+- A user may hold several roles. Effective permissions are the **union**, so
+  roles add access and never remove it.
+
+The UI mirrors this via `can(user, PERMISSIONS.X)` in `web/src/lib/session.ts`.
+**The UI copy is cosmetic.** A client-side check is never a substitute for the
+server-side one.
+
+Access tokens carry the permission list, so a permission change takes effect on
+the next access token (≤15 min), not instantly. That is the same bounded
+staleness already accepted for the session, and the reason the TTL is short.
 
 ### Authentication
 
@@ -120,6 +136,26 @@ Three things in this area will bite you if you change them carelessly:
 Never read a token TTL at module load — use the lazy accessors in `shared/tokens.ts`. A
 module-level `process.env` read captures whatever was set when the file was first imported,
 which silently ignored `.env`. `shared/env.ts` loads the file and `readInt` reads at call time.
+
+---
+
+## Logging
+
+Structured logging with pino. `logger` in `api/src/shared/logger.ts` is the root;
+**prefer `ctx.log` in resolvers** — it is a child logger bound to the request, so
+every line carries the same `requestId` and a failure can be traced end to end.
+
+- An inbound `x-request-id` is honoured, so a trace started upstream continues.
+- `redact` in the logger config strips anything credential-shaped: authorization
+  and cookie headers, passwords, tokens, hashes. **Add to that list when you add
+  a field that could carry one** — a token in a log file is a leak that outlives
+  the request and gets copied into every downstream system.
+- `loggingPlugin` writes one line per GraphQL operation with name, duration and
+  error count. Expected rejections (a permission denial) log at debug; operations
+  slower than `SLOW_OPERATION_MS` log at warn; only genuine faults reach error.
+- Auth events (`auth.login`, `auth.logout`, `auth.refresh_reuse`) are logged with
+  an `event` field so they can be alerted on. Refresh-token reuse is a warn.
+- Tests run at `silent`. Set `LOG_LEVEL` to change it locally.
 
 ---
 

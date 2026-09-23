@@ -78,7 +78,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                       {user.name}
                     </Typography>
                     <Typography variant="caption" color="text.secondary">
-                      {ROLE_LABEL[user.role]}
+                      {roleSummary(user.roles)}
                     </Typography>
                   </Box>
                 </Stack>
@@ -95,7 +95,11 @@ export function AppShell({ children }: { children: ReactNode }) {
                   <Typography variant="body2" sx={{ fontWeight: 600 }}>
                     {user.email}
                   </Typography>
-                  <Chip size="small" label={ROLE_LABEL[user.role]} sx={{ mt: 0.5 }} />
+                  <Stack direction="row" spacing={0.5} sx={{ mt: 0.5, flexWrap: 'wrap' }}>
+                    {user.roles.map((role) => (
+                      <Chip key={role.id} size="small" label={role.name} />
+                    ))}
+                  </Stack>
                 </Box>
                 <Divider />
                 <MenuItem
@@ -123,11 +127,15 @@ export function AppShell({ children }: { children: ReactNode }) {
   );
 }
 
-const ROLE_LABEL: Record<string, string> = {
-  ADMIN: 'Admin',
-  WAREHOUSE: 'Warehouse',
-  VIEWER: 'Viewer',
-};
+/**
+ * A user may hold several roles, so the header summarises rather than assuming
+ * one. Permissions decide what they can do; this is display only.
+ */
+function roleSummary(roles: { name: string }[]): string {
+  if (roles.length === 0) return 'No roles';
+  if (roles.length <= 2) return roles.map((role) => role.name).join(', ');
+  return `${roles[0]?.name} +${roles.length - 1} more`;
+}
 
 function initials(name: string): string {
   return name

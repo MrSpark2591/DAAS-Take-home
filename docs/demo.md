@@ -175,11 +175,45 @@ the check that actually enforces it:
 ```json
 {
   "errors": [{
-    "message": "Your role (VIEWER) cannot perform this action. Requires: ADMIN or WAREHOUSE.",
-    "extensions": { "code": "FORBIDDEN", "requiredRoles": ["ADMIN", "WAREHOUSE"] }
+    "message": "This action requires the \"stock:receive\" permission.",
+    "extensions": { "code": "FORBIDDEN", "requiredPermissions": ["stock:receive"] }
   }]
 }
 ```
+
+The error names the **permission**, not a role — that is the thing an administrator has to
+grant to fix it, and roles are only bundles of permissions.
+
+---
+
+## 3b. Who can do what
+
+Roles are named bundles; authorisation reads permissions.
+
+```graphql
+query Me {
+  me {
+    name
+    roles { key name permissions { key } }
+    permissions
+  }
+}
+```
+
+`permissions` is the union across every role held. Granting access to a new group of people
+is an INSERT into `role_permissions`, not a deploy:
+
+```sql
+-- A "Goods In" role that can receive deliveries and nothing else.
+INSERT INTO roles (id, key, name, is_system, updated_at)
+VALUES (gen_random_uuid(), 'goods_in', 'Goods In', false, CURRENT_TIMESTAMP);
+
+INSERT INTO role_permissions (role_id, permission_id)
+SELECT r.id, p.id FROM roles r JOIN permissions p ON p.key = 'stock:receive'
+WHERE r.key = 'goods_in';
+```
+
+Assign it, sign in again, and `receivePurchaseOrder` works — with no code change.
 
 ---
 

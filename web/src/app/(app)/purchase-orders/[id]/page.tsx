@@ -24,17 +24,17 @@ import { StatusChip } from '@/components/StatusChip';
 import { usePurchaseOrderQuery } from '@/lib/api';
 import { formatCents, formatDateTime } from '@/lib/format';
 import { useAppSelector } from '@/lib/hooks';
-import { canReceiveStock } from '@/lib/session';
+import { can, PERMISSIONS } from '@/lib/session';
 
 export default function PurchaseOrderPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const [receiveOpen, setReceiveOpen] = useState(false);
-  const role = useAppSelector((state) => state.session.user?.role);
+  const user = useAppSelector((state) => state.session.user);
 
   const { data, isLoading, error, refetch } = usePurchaseOrderQuery({ id });
   const order = data?.purchaseOrder;
 
-  const canReceive = canReceiveStock(role);
+  const canReceive = can(user, PERMISSIONS.STOCK_RECEIVE);
   const hasOutstanding = (order?.lines ?? []).some((line) => line.quantityOutstanding > 0);
 
   return (
@@ -78,7 +78,7 @@ export default function PurchaseOrderPage({ params }: { params: Promise<{ id: st
             <Tooltip
               title={
                 !canReceive
-                  ? 'Your role cannot receive stock. Switch to Ada or Wes in the header.'
+                  ? 'You do not have permission to receive stock.'
                   : !hasOutstanding
                     ? 'Every line on this order has been fully received.'
                     : ''

@@ -112,6 +112,17 @@ export type MutationVoidPurchaseOrderArgs = {
   id: Scalars['ID']['input'];
 };
 
+/**
+ * A single access right, such as `stock:receive`.
+ *
+ * Permissions are the unit of authorisation: every guarded resolver checks one,
+ * and nothing in the API branches on a role.
+ */
+export type Permission = {
+  description: Scalars['String']['output'];
+  key: Scalars['String']['output'];
+};
+
 export type Product = {
   id: Scalars['ID']['output'];
   name: Scalars['String']['output'];
@@ -172,9 +183,13 @@ export type Query = {
   locations: Array<Location>;
   /** The signed-in user, or null when the request carries no valid access token. */
   me: Maybe<User>;
+  /** The full permission catalogue, for building a role editor. */
+  permissions: Array<Permission>;
   products: Array<Product>;
   purchaseOrder: Maybe<PurchaseOrder>;
   purchaseOrders: Array<PurchaseOrder>;
+  /** Every role defined in this install. Requires the `role:manage` permission. */
+  roles: Array<Role>;
   /** On-hand stock across every product/location pair, optionally narrowed. */
   stockOnHand: Array<StockOnHand>;
   vendors: Array<Vendor>;
@@ -216,10 +231,22 @@ export type ReceivePurchaseOrderResult = {
   purchaseOrder: PurchaseOrder;
 };
 
-export type Role =
-  | 'ADMIN'
-  | 'VIEWER'
-  | 'WAREHOUSE';
+/**
+ * A named bundle of permissions.
+ *
+ * A role grants no capability of its own. It exists so access can be handed out
+ * in meaningful groups and changed without a deploy -- inventing a "goods-in"
+ * role that grants `stock:receive` needs no code change.
+ */
+export type Role = {
+  description: Maybe<Scalars['String']['output']>;
+  id: Scalars['ID']['output'];
+  /** Shipped with the product and undeletable. */
+  isSystem: Scalars['Boolean']['output'];
+  key: Scalars['String']['output'];
+  name: Scalars['String']['output'];
+  permissions: Array<Permission>;
+};
 
 /** A single immutable entry in the stock ledger. */
 export type StockMovement = {
@@ -250,7 +277,13 @@ export type User = {
   email: Scalars['String']['output'];
   id: Scalars['ID']['output'];
   name: Scalars['String']['output'];
-  role: Role;
+  /**
+   * Effective permissions: the union across every role held. This is what the UI
+   * should branch on, never a role key.
+   */
+  permissions: Array<Scalars['String']['output']>;
+  /** Every role held. A user may hold several. */
+  roles: Array<Role>;
 };
 
 export type Vendor = {
@@ -284,19 +317,19 @@ export type FormOptionsQuery = { vendors: Array<{ id: string, code: string, name
 export type MeQueryVariables = Exact<{ [key: string]: never; }>;
 
 
-export type MeQuery = { me: { id: string, name: string, email: string, role: Role } | null };
+export type MeQuery = { me: { id: string, name: string, email: string, permissions: Array<string>, roles: Array<{ id: string, key: string, name: string }> } | null };
 
 export type LoginMutationVariables = Exact<{
   input: LoginInput;
 }>;
 
 
-export type LoginMutation = { login: { expiresIn: number, user: { id: string, name: string, email: string, role: Role } } };
+export type LoginMutation = { login: { expiresIn: number, user: { id: string, name: string, email: string, permissions: Array<string>, roles: Array<{ id: string, key: string, name: string }> } } };
 
 export type RefreshSessionMutationVariables = Exact<{ [key: string]: never; }>;
 
 
-export type RefreshSessionMutation = { refreshSession: { expiresIn: number, user: { id: string, name: string, email: string, role: Role } } };
+export type RefreshSessionMutation = { refreshSession: { expiresIn: number, user: { id: string, name: string, email: string, permissions: Array<string>, roles: Array<{ id: string, key: string, name: string }> } } };
 
 export type LogoutMutationVariables = Exact<{ [key: string]: never; }>;
 

@@ -1,9 +1,10 @@
 import { ApolloServer } from '@apollo/server';
 import { startStandaloneServer } from '@apollo/server/standalone';
-import { GraphQLError } from 'graphql';
 import type { GraphQLContext } from './context.js';
 import { createContext } from './context.js';
 import { resolvers, typeDefs } from './schema.js';
+import { logger } from './shared/logger.js';
+import { loggingPlugin } from './shared/logging-plugin.js';
 import { prisma } from './shared/prisma.js';
 
 const PORT = Number(process.env.PORT ?? 4000);
@@ -11,6 +12,7 @@ const PORT = Number(process.env.PORT ?? 4000);
 const server = new ApolloServer<GraphQLContext>({
   typeDefs,
   resolvers,
+  plugins: [loggingPlugin],
   // The UI branches on `extensions.code`, so stack traces add nothing and leak
   // schema internals. Known codes pass through untouched; anything else is a
   // bug on our side and is reported without detail.
@@ -34,10 +36,9 @@ const server = new ApolloServer<GraphQLContext>({
       return { ...formatted, extensions };
     }
 
-    console.error(
-      'Unexpected GraphQL error:',
-      error instanceof GraphQLError ? (error.originalError ?? error) : error,
-    );
+    // The logging plugin has already recorded this with the request id; here
+    // we only decide what the client is allowed to see.
+    void error;
     return {
       message: 'Something went wrong. Please try again.',
       extensions: { code: 'INTERNAL_SERVER_ERROR' },
@@ -50,18 +51,19 @@ const { url } = await startStandaloneServer(server, {
   context: async ({ req, res }) => createContext({ req, res }),
 });
 
-console.log(`DaaS API ready at ${url}`);
+logger.info({ url }, 'DaaS API ready');
 
 if (process.env.DEV_AUTH_DEBUG === 'true') {
   const users = await prisma.user.findMany({
     where: { deletedAt: null },
-    orderBy: { role: 'asc' },
-    select: { email: true, role: true },
+    orderBy: { email: 'asc' },
+    select: { email: true, roles: { select: { role: { select: { key: true } } } } },
   });
   if (users.length > 0) {
     console.log('\nSeeded sign-ins (dev only) — password is the same for all:');
     for (const user of users) {
-      console.log(`  ${user.role.padEnd(9)} ${user.email}`);
+      const roles = user.roles.map((r) => r.role.key).join(', ') || 'no roles';
+      console.log(`  ${user.email.padEnd(16)} ${roles}`);
     }
     console.log(`  password: ${process.env.SEED_PASSWORD ?? 'daas-dev-password'}\n`);
   }
@@ -72,6 +74,7 @@ if (process.env.DEV_AUTH_DEBUG === 'true') {
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {
   process.on(signal, () => {
     void (async () => {
+      logger.info({ signal }, 'shutting down');
       await server.stop();
       await prisma.$disconnect();
       process.exit(0);

@@ -1,4 +1,5 @@
 import { type Location, PrismaClient, type Product, type User, type Vendor } from '@prisma/client';
+import { loadEffectiveAccess } from '../src/domains/auth/service.js';
 import type { Actor } from '../src/shared/auth.js';
 import { hashPassword } from '../src/shared/password.js';
 
@@ -37,30 +38,50 @@ const unique = (prefix: string) => `${prefix}-${process.pid}-${counter++}`;
 export const FIXTURE_PASSWORD = 'fixture-password';
 const fixturePasswordHash = await hashPassword(FIXTURE_PASSWORD);
 
+/**
+ * System roles come from the migration, so they exist before any test runs.
+ * Cached because every fixture set needs them and they never change.
+ */
+const systemRoleIds = new Map<string, string>();
+
+async function loadSystemRoles(): Promise<void> {
+  if (systemRoleIds.size > 0) return;
+  const roles = await prisma.role.findMany({ where: { deletedAt: null } });
+  for (const role of roles) systemRoleIds.set(role.key, role.id);
+}
+
+function roleId(key: string): string {
+  const id = systemRoleIds.get(key);
+  if (!id) throw new Error(`System role "${key}" is missing; did the migration run?`);
+  return id;
+}
+
 export async function seedFixtures(): Promise<Fixtures> {
+  await loadSystemRoles();
+
   const [admin, warehouse, viewer] = await Promise.all([
     prisma.user.create({
       data: {
         email: `${unique('admin')}@test.local`,
         name: 'Admin',
-        role: 'ADMIN',
         passwordHash: fixturePasswordHash,
+        roles: { create: { role: { connect: { id: roleId('admin') } } } },
       },
     }),
     prisma.user.create({
       data: {
         email: `${unique('wh')}@test.local`,
         name: 'Warehouse',
-        role: 'WAREHOUSE',
         passwordHash: fixturePasswordHash,
+        roles: { create: { role: { connect: { id: roleId('warehouse') } } } },
       },
     }),
     prisma.user.create({
       data: {
         email: `${unique('viewer')}@test.local`,
         name: 'Viewer',
-        role: 'VIEWER',
         passwordHash: fixturePasswordHash,
+        roles: { create: { role: { connect: { id: roleId('viewer') } } } },
       },
     }),
   ]);
@@ -76,7 +97,15 @@ export async function seedFixtures(): Promise<Fixtures> {
   return { admin, warehouse, viewer, vendor, mainLocation, overflowLocation, widget, gadget };
 }
 
-export const actorFor = (user: User): Actor => ({ id: user.id, role: user.role });
+/**
+ * Builds the actor a resolver would see, resolving the user's effective
+ * permissions the same way a real sign-in does -- so a test cannot accidentally
+ * grant itself access the login path would not.
+ */
+export async function actorFor(user: User): Promise<Actor> {
+  const access = await loadEffectiveAccess(user.id);
+  return { id: user.id, permissions: new Set(access.permissions), roles: access.roles };
+}
 
 /** Creates a PO directly, bypassing the service, so tests set up state without asserting on it. */
 export async function givenPurchaseOrder(

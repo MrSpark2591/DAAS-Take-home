@@ -1,5 +1,7 @@
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import { receivePurchaseOrder, voidPurchaseOrder } from '../src/domains/purchasing/service.js';
+import { requirePermission } from '../src/shared/auth.js';
+import { PERMISSIONS } from '../src/shared/permissions.js';
 import {
   actorFor,
   type Fixtures,
@@ -36,7 +38,7 @@ describe('receiving against a purchase order', () => {
     const line = po.lines[0]!;
 
     // The truck showed up with 8 of the 20 ordered.
-    await receivePurchaseOrder(actorFor(fx.warehouse), {
+    await receivePurchaseOrder(await actorFor(fx.warehouse), {
       purchaseOrderId: po.id,
       lines: [{ purchaseOrderLineId: line.id, quantity: 8 }],
     });
@@ -48,7 +50,7 @@ describe('receiving against a purchase order', () => {
     expect(partial?.totalReceived).toBe(8);
 
     // The rest arrives later.
-    await receivePurchaseOrder(actorFor(fx.warehouse), {
+    await receivePurchaseOrder(await actorFor(fx.warehouse), {
       purchaseOrderId: po.id,
       lines: [{ purchaseOrderLineId: line.id, quantity: 12 }],
     });
@@ -65,14 +67,14 @@ describe('receiving against a purchase order', () => {
     const po = await givenPurchaseOrder(fx, [{ productId: fx.widget.id, quantityOrdered: 10 }]);
     const line = po.lines[0]!;
 
-    await receivePurchaseOrder(actorFor(fx.warehouse), {
+    await receivePurchaseOrder(await actorFor(fx.warehouse), {
       purchaseOrderId: po.id,
       lines: [{ purchaseOrderLineId: line.id, quantity: 7 }],
     });
 
     // Only 3 outstanding, but the docket says 5.
     await expect(
-      receivePurchaseOrder(actorFor(fx.warehouse), {
+      receivePurchaseOrder(await actorFor(fx.warehouse), {
         purchaseOrderId: po.id,
         lines: [{ purchaseOrderLineId: line.id, quantity: 5 }],
       }),
@@ -94,7 +96,7 @@ describe('receiving against a purchase order', () => {
     // roll back -- a half-applied delivery is the worst possible outcome,
     // because on-hand silently disagrees with the paperwork.
     await expect(
-      receivePurchaseOrder(actorFor(fx.warehouse), {
+      receivePurchaseOrder(await actorFor(fx.warehouse), {
         purchaseOrderId: po.id,
         lines: [
           { purchaseOrderLineId: widgetLine!.id, quantity: 10 },
@@ -116,7 +118,7 @@ describe('receiving against a purchase order', () => {
     // Scanning the same SKU twice on one docket: 6 + 6 is 12, over the 10
     // ordered, even though neither entry exceeds it on its own.
     await expect(
-      receivePurchaseOrder(actorFor(fx.warehouse), {
+      receivePurchaseOrder(await actorFor(fx.warehouse), {
         purchaseOrderId: po.id,
         lines: [
           { purchaseOrderLineId: line.id, quantity: 6 },
@@ -132,7 +134,7 @@ describe('receiving against a purchase order', () => {
     const po = await givenPurchaseOrder(fx, [{ productId: fx.widget.id, quantityOrdered: 5 }]);
 
     // Delivery diverted to the overflow bay because main was full.
-    await receivePurchaseOrder(actorFor(fx.warehouse), {
+    await receivePurchaseOrder(await actorFor(fx.warehouse), {
       purchaseOrderId: po.id,
       locationId: fx.overflowLocation.id,
       lines: [{ purchaseOrderLineId: po.lines[0]!.id, quantity: 5 }],
@@ -152,11 +154,11 @@ describe('receiving against a purchase order', () => {
     // `FOR UPDATE` lock on the PO both read "1 outstanding" and both write,
     // leaving on-hand at 2 for a single ordered unit.
     const results = await Promise.allSettled([
-      receivePurchaseOrder(actorFor(fx.warehouse), {
+      receivePurchaseOrder(await actorFor(fx.warehouse), {
         purchaseOrderId: po.id,
         lines: [{ purchaseOrderLineId: line.id, quantity: 1 }],
       }),
-      receivePurchaseOrder(actorFor(fx.admin), {
+      receivePurchaseOrder(await actorFor(fx.admin), {
         purchaseOrderId: po.id,
         lines: [{ purchaseOrderLineId: line.id, quantity: 1 }],
       }),
@@ -175,7 +177,7 @@ describe('receiving against a purchase order', () => {
     ]);
 
     await expect(
-      receivePurchaseOrder(actorFor(fx.warehouse), {
+      receivePurchaseOrder(await actorFor(fx.warehouse), {
         purchaseOrderId: mine.id,
         lines: [{ purchaseOrderLineId: theirs.lines[0]!.id, quantity: 1 }],
       }),
@@ -190,7 +192,7 @@ describe('receiving against a purchase order', () => {
 
     for (const quantity of [0, -3]) {
       await expect(
-        receivePurchaseOrder(actorFor(fx.warehouse), {
+        receivePurchaseOrder(await actorFor(fx.warehouse), {
           purchaseOrderId: po.id,
           lines: [{ purchaseOrderLineId: line.id, quantity }],
         }),
@@ -202,30 +204,82 @@ describe('receiving against a purchase order', () => {
 });
 
 describe('who is allowed to receive', () => {
-  it('lets warehouse staff receive', async () => {
+  it('lets a user holding stock:receive receive', async () => {
     const po = await givenPurchaseOrder(fx, [{ productId: fx.widget.id, quantityOrdered: 3 }]);
 
     await expect(
-      receivePurchaseOrder(actorFor(fx.warehouse), {
+      receivePurchaseOrder(await actorFor(fx.warehouse), {
         purchaseOrderId: po.id,
         lines: [{ purchaseOrderLineId: po.lines[0]!.id, quantity: 3 }],
       }),
     ).resolves.toBeDefined();
   });
 
-  // Note: the role check itself lives in the resolver via `requireRole`, so the
-  // API-level rejection is covered by the schema test below. This asserts the
-  // policy function that both the resolver and the UI read from.
-  it('does not include viewers in the receiving role set', async () => {
-    const { CAN_RECEIVE_STOCK, requireRole } = await import('../src/shared/auth.js');
+  // The gate lives in the resolver, so these assert the policy function that
+  // both the resolver and the UI read from.
+  it('refuses a viewer, who holds no stock:receive permission', async () => {
+    const viewer = await actorFor(fx.viewer);
 
-    expect(() => requireRole(actorFor(fx.viewer), CAN_RECEIVE_STOCK)).toThrowError(
-      /cannot perform this action/i,
+    expect(() => requirePermission(viewer, PERMISSIONS.STOCK_RECEIVE)).toThrowError(
+      /requires the "stock:receive" permission/i,
     );
-    expect(() => requireRole(null, CAN_RECEIVE_STOCK)).toThrowError(/sign in/i);
-    expect(requireRole(actorFor(fx.warehouse), CAN_RECEIVE_STOCK)).toMatchObject({
-      role: 'WAREHOUSE',
+    expect(() => requirePermission(null, PERMISSIONS.STOCK_RECEIVE)).toThrowError(/sign in/i);
+    expect(
+      requirePermission(await actorFor(fx.warehouse), PERMISSIONS.STOCK_RECEIVE),
+    ).toMatchObject({ id: fx.warehouse.id });
+  });
+
+  it('grants access through any role holding the permission, not a named role', async () => {
+    // The point of the split: a role invented at runtime, with no code change,
+    // must be able to authorise receiving. If this ever fails, something has
+    // started branching on a role key again.
+    const goodsIn = await prisma.role.create({
+      data: {
+        key: `goods-in-${Date.now()}`,
+        name: 'Goods In',
+        permissions: {
+          create: {
+            permission: { connect: { key: PERMISSIONS.STOCK_RECEIVE } },
+          },
+        },
+      },
     });
+    await prisma.userRole.create({ data: { userId: fx.viewer.id, roleId: goodsIn.id } });
+
+    const po = await givenPurchaseOrder(fx, [{ productId: fx.widget.id, quantityOrdered: 4 }]);
+
+    await expect(
+      receivePurchaseOrder(await actorFor(fx.viewer), {
+        purchaseOrderId: po.id,
+        lines: [{ purchaseOrderLineId: po.lines[0]!.id, quantity: 4 }],
+      }),
+    ).resolves.toBeDefined();
+
+    expect(await onHand(fx.widget.id, fx.mainLocation.id)).toBe(4);
+  });
+
+  it('takes the union when a user holds several roles', async () => {
+    // Roles add access and never subtract it, so holding viewer *and* a role
+    // granting receive must leave the user able to receive.
+    const access = await actorFor(fx.viewer);
+    expect(access.permissions.has(PERMISSIONS.STOCK_RECEIVE)).toBe(false);
+
+    const extra = await prisma.role.create({
+      data: {
+        key: `extra-${Date.now()}`,
+        name: 'Extra',
+        permissions: {
+          create: { permission: { connect: { key: PERMISSIONS.STOCK_RECEIVE } } },
+        },
+      },
+    });
+    await prisma.userRole.create({ data: { userId: fx.viewer.id, roleId: extra.id } });
+
+    const widened = await actorFor(fx.viewer);
+    expect(widened.roles).toHaveLength(2);
+    // Kept what viewer granted, gained what the new role grants.
+    expect(widened.permissions.has(PERMISSIONS.PURCHASE_ORDER_READ)).toBe(true);
+    expect(widened.permissions.has(PERMISSIONS.STOCK_RECEIVE)).toBe(true);
   });
 });
 
@@ -233,7 +287,7 @@ describe('voiding a purchase order', () => {
   it('refuses once stock has been received against it', async () => {
     const po = await givenPurchaseOrder(fx, [{ productId: fx.widget.id, quantityOrdered: 5 }]);
 
-    await receivePurchaseOrder(actorFor(fx.warehouse), {
+    await receivePurchaseOrder(await actorFor(fx.warehouse), {
       purchaseOrderId: po.id,
       lines: [{ purchaseOrderLineId: po.lines[0]!.id, quantity: 1 }],
     });

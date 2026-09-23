@@ -1,7 +1,9 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import type { Logger } from 'pino';
 import { ACCESS_COOKIE, parseCookies, REFRESH_COOKIE } from './domains/auth/cookies.js';
 import { createLoaders, type Loaders } from './domains/purchasing/loaders.js';
 import { type Actor, bearerFromHeader, resolveActor } from './shared/auth.js';
+import { requestLogger, resolveRequestId } from './shared/logger.js';
 import { prisma } from './shared/prisma.js';
 
 export interface GraphQLContext {
@@ -15,6 +17,10 @@ export interface GraphQLContext {
   refreshToken: string | null;
   userAgent: string | null;
   ipAddress: string | null;
+  /** Correlates every log line this request produces. */
+  requestId: string;
+  /** Request-scoped logger. Prefer this over the root logger in resolvers. */
+  log: Logger;
 }
 
 export async function createContext({
@@ -30,17 +36,25 @@ export async function createContext({
   // Authorization header is accepted too, so curl, the Apollo sandbox and the
   // integration tests can drive the API without a cookie jar.
   const accessToken = bearerFromHeader(req.headers.authorization) ?? cookies[ACCESS_COOKIE] ?? null;
+  const actor = await resolveActor(accessToken);
+
+  // Honours an inbound x-request-id so a trace started at the proxy (or an
+  // ingress) continues through the API rather than restarting here.
+  const requestId = resolveRequestId(req.headers['x-request-id']);
+  const ipAddress = clientIp(req);
 
   return {
     db: prisma,
-    actor: await resolveActor(accessToken),
+    actor,
     // Fresh per request: a DataLoader cache that outlived a request would
     // serve one user's rows to the next.
     loaders: createLoaders(prisma),
     res,
     refreshToken: cookies[REFRESH_COOKIE] ?? null,
     userAgent: req.headers['user-agent'] ?? null,
-    ipAddress: clientIp(req),
+    ipAddress,
+    requestId,
+    log: requestLogger({ requestId, userId: actor?.id ?? null, ip: ipAddress }),
   };
 }
 

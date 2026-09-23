@@ -10,7 +10,8 @@ import type {
 } from '@prisma/client';
 import { DateTimeResolver } from 'graphql-scalars';
 import type { GraphQLContext } from '../../context.js';
-import { CAN_MANAGE_PURCHASE_ORDERS, CAN_RECEIVE_STOCK, requireRole } from '../../shared/auth.js';
+import { requirePermission } from '../../shared/auth.js';
+import { PERMISSIONS } from '../../shared/permissions.js';
 import { live } from '../../shared/prisma.js';
 import * as service from './service.js';
 
@@ -92,15 +93,18 @@ export const resolvers = {
 
   Mutation: {
     createPurchaseOrder: (_p: unknown, args: { input: unknown }, { actor }: Ctx) =>
-      service.createPurchaseOrder(requireRole(actor, CAN_MANAGE_PURCHASE_ORDERS), args.input),
+      service.createPurchaseOrder(
+        requirePermission(actor, PERMISSIONS.PURCHASE_ORDER_CREATE),
+        args.input,
+      ),
 
-    // The guarded mutation: a VIEWER token gets FORBIDDEN before any row is
-    // touched, and the UI mirrors the same rule by disabling the button.
+    // The guarded mutation. Gated on the permission, not on a role: a bespoke
+    // "goods-in" role granting stock:receive works here with no code change.
     receivePurchaseOrder: (_p: unknown, args: { input: unknown }, { actor }: Ctx) =>
-      service.receivePurchaseOrder(requireRole(actor, CAN_RECEIVE_STOCK), args.input),
+      service.receivePurchaseOrder(requirePermission(actor, PERMISSIONS.STOCK_RECEIVE), args.input),
 
     voidPurchaseOrder: (_p: unknown, args: { id: string }, { actor }: Ctx) => {
-      requireRole(actor, CAN_MANAGE_PURCHASE_ORDERS);
+      requirePermission(actor, PERMISSIONS.PURCHASE_ORDER_VOID);
       return service.voidPurchaseOrder(args.id);
     },
   },

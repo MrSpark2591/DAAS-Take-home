@@ -1,4 +1,12 @@
-import type { Location, Product, StockMovement, User, Vendor } from '@prisma/client';
+import type {
+  Location,
+  Permission,
+  Product,
+  Role,
+  StockMovement,
+  User,
+  Vendor,
+} from '@prisma/client';
 import DataLoader from 'dataloader';
 import { live, type Tx } from '../../shared/prisma.js';
 
@@ -110,6 +118,43 @@ export function createLoaders(db: Tx) {
         else grouped.set(row.purchaseOrderLineId, [row]);
       }
       return lineIds.map((id) => grouped.get(id) ?? []);
+    }),
+
+    /**
+     * Roles per user. Without this, rendering a list of users with their roles
+     * is one query per user, and `User.permissions` makes it two.
+     */
+    rolesByUserId: new DataLoader<string, Role[]>(async (userIds) => {
+      const rows = await db.userRole.findMany({
+        where: { userId: { in: [...userIds] }, role: { ...live } },
+        select: { userId: true, role: true },
+      });
+
+      const grouped = new Map<string, Role[]>();
+      for (const row of rows) {
+        const bucket = grouped.get(row.userId);
+        if (bucket) bucket.push(row.role);
+        else grouped.set(row.userId, [row.role]);
+      }
+      return userIds.map((id) => grouped.get(id) ?? []);
+    }),
+
+    /** Permissions granted by a role. */
+    permissionsByRoleId: new DataLoader<string, Permission[]>(async (roleIds) => {
+      const rows = await db.rolePermission.findMany({
+        where: { roleId: { in: [...roleIds] } },
+        select: { roleId: true, permission: true },
+      });
+
+      const grouped = new Map<string, Permission[]>();
+      for (const row of rows) {
+        const bucket = grouped.get(row.roleId);
+        if (bucket) bucket.push(row.permission);
+        else grouped.set(row.roleId, [row.permission]);
+      }
+      return roleIds.map((id) =>
+        (grouped.get(id) ?? []).sort((a, b) => a.key.localeCompare(b.key)),
+      );
     }),
 
     stockOnHandByProductId: new DataLoader(async (productIds: readonly string[]) => {

@@ -17,8 +17,9 @@ async function main() {
   // Order matters for FKs; CASCADE handles the rest.
   await prisma.$executeRawUnsafe(`
     TRUNCATE TABLE
-      "refresh_tokens", "stock_movements", "stock_on_hand", "purchase_order_lines",
-      "purchase_orders", "products", "locations", "vendors", "users"
+      "user_roles", "refresh_tokens", "stock_movements", "stock_on_hand",
+      "purchase_order_lines", "purchase_orders", "products", "locations",
+      "vendors", "users"
     RESTART IDENTITY CASCADE
   `);
 
@@ -30,15 +31,22 @@ async function main() {
 
   const [admin, warehouse, viewer] = await Promise.all([
     prisma.user.create({
-      data: { email: 'ada@daas.test', name: 'Ada Admin', role: 'ADMIN', passwordHash },
+      data: { email: 'ada@daas.test', name: 'Ada Admin', passwordHash },
     }),
     prisma.user.create({
-      data: { email: 'wes@daas.test', name: 'Wes Warehouse', role: 'WAREHOUSE', passwordHash },
+      data: { email: 'wes@daas.test', name: 'Wes Warehouse', passwordHash },
     }),
     prisma.user.create({
-      data: { email: 'vic@daas.test', name: 'Vic Viewer', role: 'VIEWER', passwordHash },
+      data: { email: 'vic@daas.test', name: 'Vic Viewer', passwordHash },
     }),
   ]);
+
+  // Roles and permissions are created by the migration and are reference data,
+  // not sample data -- the truncate below leaves them alone. Here we only
+  // attach each seeded user to the role they should hold.
+  await assignRole(admin.id, 'admin');
+  await assignRole(warehouse.id, 'warehouse');
+  await assignRole(viewer.id, 'viewer');
 
   const vendors = await Promise.all(
     [
@@ -169,9 +177,20 @@ async function main() {
   console.log('Seeded 3 users, 3 vendors, 5 products, 3 locations, 4 purchase orders.\n');
   console.log('Sign in at http://localhost:3000/login with any of:\n');
   for (const user of [admin, warehouse, viewer]) {
-    console.log(`  ${user.role.padEnd(9)} ${user.email}`);
+    console.log(`  ${user.email}`);
   }
   console.log(`\n  password: ${password}\n`);
+}
+
+/** Attaches a user to a system role created by the migration. */
+async function assignRole(userId: string, roleKey: string): Promise<void> {
+  const role = await prisma.role.findFirst({ where: { key: roleKey, deletedAt: null } });
+  if (!role) {
+    throw new Error(
+      `System role "${roleKey}" is missing. Run \`npx prisma migrate deploy\` first.`,
+    );
+  }
+  await prisma.userRole.create({ data: { userId, roleId: role.id } });
 }
 
 main()

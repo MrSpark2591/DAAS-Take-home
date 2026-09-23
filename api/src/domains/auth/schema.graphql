@@ -1,7 +1,31 @@
-enum Role {
-  ADMIN
-  WAREHOUSE
-  VIEWER
+"""
+A single access right, such as `stock:receive`.
+
+Permissions are the unit of authorisation: every guarded resolver checks one,
+and nothing in the API branches on a role.
+"""
+type Permission {
+  key: String!
+  description: String!
+}
+
+"""
+A named bundle of permissions.
+
+A role grants no capability of its own. It exists so access can be handed out
+in meaningful groups and changed without a deploy -- inventing a "goods-in"
+role that grants `stock:receive` needs no code change.
+"""
+type Role {
+  id: ID!
+  key: String!
+  name: String!
+  description: String
+  """
+  Shipped with the product and undeletable.
+  """
+  isSystem: Boolean!
+  permissions: [Permission!]!
 }
 
 """
@@ -12,7 +36,15 @@ type User {
   id: ID!
   name: String!
   email: String!
-  role: Role!
+  """
+  Every role held. A user may hold several.
+  """
+  roles: [Role!]!
+  """
+  Effective permissions: the union across every role held. This is what the UI
+  should branch on, never a role key.
+  """
+  permissions: [String!]!
 }
 
 """
@@ -36,6 +68,12 @@ input LoginInput {
 extend type Query {
   "The signed-in user, or null when the request carries no valid access token."
   me: User
+
+  "Every role defined in this install. Requires the `role:manage` permission."
+  roles: [Role!]!
+
+  "The full permission catalogue, for building a role editor."
+  permissions: [Permission!]!
 }
 
 extend type Mutation {

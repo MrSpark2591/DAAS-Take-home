@@ -21,9 +21,12 @@ function gqlError(code: ErrorCode, message: string, extra?: Record<string, unkno
 export const unauthenticated = (message = 'Sign in to continue.') =>
   gqlError('UNAUTHENTICATED', message);
 
-/** `required` is echoed back so the UI can say *which* role was missing. */
+/**
+ * `required` is echoed back so a client can say precisely which permission is
+ * missing -- which is also the thing an administrator has to grant to fix it.
+ */
 export const forbidden = (message: string, required?: readonly string[]) =>
-  gqlError('FORBIDDEN', message, required ? { requiredRoles: required } : undefined);
+  gqlError('FORBIDDEN', message, required ? { requiredPermissions: required } : undefined);
 
 export const notFound = (entity: string, id: string) =>
   gqlError('NOT_FOUND', `${entity} ${id} does not exist.`, { entity, id });

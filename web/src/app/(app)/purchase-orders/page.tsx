@@ -22,7 +22,7 @@ import type { PurchaseOrderStatus } from '@/generated/graphql';
 import { usePurchaseOrdersQuery } from '@/lib/api';
 import { formatCents, formatDate } from '@/lib/format';
 import { useAppSelector } from '@/lib/hooks';
-import { canManagePurchaseOrders } from '@/lib/session';
+import { can, PERMISSIONS } from '@/lib/session';
 
 type StatusFilter = PurchaseOrderStatus | 'ALL';
 
@@ -36,7 +36,8 @@ const FILTERS: { value: StatusFilter; label: string }[] = [
 export default function PurchaseOrdersPage() {
   const router = useRouter();
   const [status, setStatus] = useState<StatusFilter>('ALL');
-  const role = useAppSelector((state) => state.session.user?.role);
+  const user = useAppSelector((state) => state.session.user);
+  const canCreate = can(user, PERMISSIONS.PURCHASE_ORDER_CREATE);
 
   // The filter is part of the query key, so RTK Query caches each tab
   // separately and switching back to a visited tab is instant.
@@ -76,7 +77,7 @@ export default function PurchaseOrdersPage() {
             ))}
           </TextField>
 
-          {canManagePurchaseOrders(role) ? (
+          {canCreate ? (
             <Button
               variant="contained"
               startIcon={<AddIcon />}
@@ -101,7 +102,7 @@ export default function PurchaseOrdersPage() {
             : 'Try a different status.'
         }
         emptyAction={
-          status === 'ALL' && canManagePurchaseOrders(role) ? (
+          status === 'ALL' && canCreate ? (
             <Button variant="contained" component={Link} href="/purchase-orders/new">
               New purchase order
             </Button>

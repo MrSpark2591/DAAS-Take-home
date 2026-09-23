@@ -6,7 +6,8 @@ on-hand quantities move — with the PO's status derived from what has actually 
 never set by hand.
 
 **Stack:** Node 24 · TypeScript (strict) · Postgres 17 · Prisma 6 · Apollo Server 5 ·
-Next.js 16 (App Router) · MUI 9 · Redux Toolkit + RTK Query · react-hook-form + zod · Biome
+Next.js 16 (App Router) · MUI 9 · Redux Toolkit + RTK Query · react-hook-form + zod ·
+pino · Biome
 
 ---
 
@@ -76,11 +77,11 @@ Real authentication: password sign-in, a signed JWT access token, and a rotating
 refresh token. Sign in at <http://localhost:3000/login> with any seeded account — the
 password is the same for all three and is printed by `npm run seed`.
 
-| User | Role | Can |
+| User | Role | Effective permissions |
 | --- | --- | --- |
-| `ada@daas.test` | `ADMIN` | Everything: create POs, receive, void |
-| `wes@daas.test` | `WAREHOUSE` | Receive stock |
-| `vic@daas.test` | `VIEWER` | Read only |
+| `ada@daas.test` | Administrator | all 8 |
+| `wes@daas.test` | Warehouse | `purchase_order:read`, `stock:read`, `stock:receive`, `stock:adjust` |
+| `vic@daas.test` | Viewer | `purchase_order:read`, `stock:read` |
 
 Sign in as Vic and the **Receive stock** button is disabled. Force it back on in devtools
 and the API still returns `FORBIDDEN` — the UI mirrors the rule, the server owns it.
@@ -91,8 +92,9 @@ and the API still returns `FORBIDDEN` — the UI mirrors the rule, the server ow
 cd api && npm test
 ```
 
-26 integration tests against a real Postgres — receiving, and the session lifecycle. They
-create and migrate a separate `daas_test` database, so they never touch your seeded dev data.
+29 integration tests against a real Postgres — receiving, authorisation, and the session
+lifecycle. They create and migrate a separate `daas_test` database, so they never touch your
+seeded dev data.
 
 ```bash
 npm run verify
@@ -128,10 +130,14 @@ api/
       resolvers.ts             #   auth + shape translation only
       service.ts               #   domain rules and transaction boundaries
       loaders.ts               #   per-request DataLoaders
-    domains/auth/              # identity: sign-in, rotation, cookies
-      service.ts               #   rotation and reuse detection
+    domains/auth/              # identity: sign-in, rotation, roles, cookies
+      service.ts               #   rotation, reuse detection, effective permissions
       cookies.ts               #   httpOnly cookie shaping
-    shared/                    # auth, tokens, password, errors, prisma, id, env
+    shared/
+      permissions.ts           #   the permission catalogue — source of truth
+      auth.ts                  #   requirePermission, the single authorisation gate
+      logger.ts                #   pino, with credential redaction
+      logging-plugin.ts        #   one log line per GraphQL operation
     schema.ts                  # the only place domains are wired together
     index.ts
   tests/                       # integration tests against real Postgres
@@ -152,7 +158,7 @@ web/
 A domain is a folder exporting `{ typeDefs, resolvers }`. Sprint 3's drawings or sprint 4's
 RMAs are a sibling folder plus one line in `src/schema.ts`; nothing else in the server changes.
 
-The boundary that matters is `resolvers.ts` → `service.ts`. Resolvers check a role and
+The boundary that matters is `resolvers.ts` → `service.ts`. Resolvers check a permission and
 translate shapes. Services own the rules and the transactions, and take no GraphQL types in
 their signatures — so when sprint 4 needs "closing an RMA returns stock", it calls the same
 stock-movement code path rather than reimplementing it behind a second resolver.
@@ -309,7 +315,43 @@ no stack trace.
 Relations resolve through per-request DataLoaders, so a list of 50 POs with vendors, locations
 and line products is a fixed handful of queries rather than a few hundred.
 
-### Auth
+### Authorisation: permissions, not roles
+
+Roles are **named bundles of permissions**, and nothing in the codebase branches on a
+role key. Every guarded resolver asks for a permission:
+
+```ts
+receivePurchaseOrder: (_p, args, { actor }) =>
+  service.receivePurchaseOrder(requirePermission(actor, PERMISSIONS.STOCK_RECEIVE), args.input),
+```
+
+| Table | Holds |
+| --- | --- |
+| `permissions` | The catalogue — `stock:receive`, `purchase_order:create`, … |
+| `roles` | Named bundles. `is_system` marks the three that ship |
+| `role_permissions` | What a role grants. **Data** — editable without a deploy |
+| `user_roles` | Who holds what. A user may hold several |
+
+The split earns its keep the moment someone needs a role the product did not ship.
+Creating a "Goods In" role that grants only `stock:receive` is three INSERTs; the
+receive mutation then authorises it with **no code change**. There is a test that does
+exactly this, because it is the property that would otherwise rot the first time
+someone reaches for a role name.
+
+The permission *catalogue* stays in code (`api/src/shared/permissions.ts`) — the
+application can only check permissions it knows at compile time, and a typo should be a
+typecheck failure rather than a silently-false check. What is data is the mapping.
+
+A user's effective permissions are the **union** across their roles, so roles add access
+and never remove it. Errors name the missing permission, because that is what an
+administrator has to grant:
+
+```json
+{ "message": "This action requires the \"stock:receive\" permission.",
+  "extensions": { "code": "FORBIDDEN", "requiredPermissions": ["stock:receive"] } }
+```
+
+### Sessions
 
 Two token types, deliberately different, both delivered as httpOnly cookies:
 
@@ -354,10 +396,41 @@ at `/api/graphql`, which forwards to the API and relays `Set-Cookie` back. That 
 cookies first-party — no CORS credential negotiation, `SameSite=Lax`, `Secure` in
 production — and means `document.cookie` is empty even to an XSS payload.
 
-**The accepted limitation:** an access token stays valid until it expires. Deactivating a
-user or changing a role takes effect within 15 minutes, not instantly. The fix, if that
-window mattered, is a `token_version` column checked per request, trading a little
-statelessness for immediate revocation.
+The access token carries the user's **effective permissions**, which is what keeps
+authorisation free of a database round trip on every request.
+
+**The accepted limitation:** an access token stays valid until it expires. Granting or
+revoking a permission takes effect within 15 minutes, not instantly. That is the same
+bounded staleness the session already accepts, and the reason the TTL is short. The fix,
+if that window mattered, is a `token_version` column checked per request, trading a
+little statelessness for immediate revocation.
+
+---
+
+## Logging
+
+Structured JSON via pino — pretty-printed locally, JSON in production.
+
+One line per GraphQL operation, carrying a `requestId` that an inbound `x-request-id`
+can set, so a trace started at the proxy continues through the API:
+
+```
+INFO: graphql operation
+    requestId: "trace-abc"   userId: "01a0ccc8-…"   operation: "PurchaseOrders"
+    durationMs: 11           errorCount: 0
+```
+
+Levels are chosen so a production `level: warn` still surfaces everything actionable:
+expected rejections (a permission denial) sit at debug, operations over
+`SLOW_OPERATION_MS` warn with `slow: true`, and only genuine faults reach error.
+
+Auth events carry an `event` field for alerting — `auth.login`, `auth.logout`, and
+`auth.refresh_reuse`, the last being refresh-token theft detection and therefore a warn.
+
+**Everything credential-shaped is redacted by path** before it is written: authorization
+and cookie headers, passwords, tokens and hashes. A token that reaches a log file is a
+leak that outlives the request and gets copied into every downstream system, so this is
+configured centrally rather than trusted to each call site.
 
 ---
 

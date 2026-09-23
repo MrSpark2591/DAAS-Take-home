@@ -2,6 +2,7 @@ import type { User } from '@prisma/client';
 import { z } from 'zod';
 import { unauthenticated } from '../../shared/errors.js';
 import { hashPassword, verifyPassword } from '../../shared/password.js';
+import { isPermission, type Permission } from '../../shared/permissions.js';
 import { live, prisma } from '../../shared/prisma.js';
 import {
   accessTokenTtlSeconds,
@@ -197,12 +198,51 @@ export async function revokeAllSessions(userId: string): Promise<number> {
 
 // ---------------------------------------------------------------------------
 
+/**
+ * A user's effective access: the union of the permissions granted by every role
+ * they hold.
+ *
+ * Roles add access and never remove it, so holding two roles grants both sets.
+ * Soft-deleted roles are excluded, which is how revoking a role takes effect
+ * without touching each user who held it.
+ */
+export async function loadEffectiveAccess(
+  userId: string,
+): Promise<{ permissions: Permission[]; roles: string[] }> {
+  const assignments = await prisma.userRole.findMany({
+    where: { userId, role: { ...live } },
+    select: {
+      role: {
+        select: {
+          key: true,
+          permissions: { select: { permission: { select: { key: true } } } },
+        },
+      },
+    },
+  });
+
+  const permissions = new Set<Permission>();
+  const roles: string[] = [];
+
+  for (const { role } of assignments) {
+    roles.push(role.key);
+    for (const grant of role.permissions) {
+      // Rows the current build does not recognise are ignored rather than
+      // trusted: the code is the source of truth for what a permission means.
+      if (isPermission(grant.permission.key)) permissions.add(grant.permission.key);
+    }
+  }
+
+  return { permissions: [...permissions].sort(), roles: roles.sort() };
+}
+
 async function issueSession(
   user: User,
   familyId: string,
   context: SessionContext,
 ): Promise<IssuedSession> {
   const refreshToken = generateRefreshToken();
+  const access = await loadEffectiveAccess(user.id);
 
   await prisma.refreshToken.create({
     data: {
@@ -217,7 +257,11 @@ async function issueSession(
 
   return {
     user,
-    accessToken: await signAccessToken({ sub: user.id, role: user.role }),
+    accessToken: await signAccessToken({
+      sub: user.id,
+      permissions: access.permissions,
+      roles: access.roles,
+    }),
     refreshToken,
     expiresIn: accessTokenTtlSeconds(),
     refreshExpiresIn: refreshTokenTtlSeconds(),

@@ -1,7 +1,7 @@
 import { createHash, randomBytes } from 'node:crypto';
-import type { Role } from '@prisma/client';
 import { jwtVerify, SignJWT } from 'jose';
 import { readInt } from './env.js';
+import { isPermission, type Permission } from './permissions.js';
 
 /**
  * Token primitives. Deliberately two different shapes:
@@ -40,11 +40,21 @@ function secret(): Uint8Array {
 
 export interface AccessTokenClaims {
   sub: string;
-  role: Role;
+  /**
+   * The user's effective permissions, flattened from every role they hold.
+   *
+   * Carrying these in the token is what keeps authorisation free of a database
+   * round trip. The cost is that a permission change takes effect on the next
+   * access token, not instantly -- the same bounded staleness already accepted
+   * for the session itself, and the reason the access TTL is short.
+   */
+  permissions: Permission[];
+  /** Carried for display and audit only. Nothing authorises on a role key. */
+  roles: string[];
 }
 
 export async function signAccessToken(claims: AccessTokenClaims): Promise<string> {
-  return await new SignJWT({ role: claims.role })
+  return await new SignJWT({ perms: claims.permissions, roles: claims.roles })
     .setProtectedHeader({ alg: 'HS256', typ: 'JWT' })
     .setSubject(claims.sub)
     .setIssuer(ISSUER)
@@ -68,17 +78,20 @@ export async function verifyAccessToken(token: string): Promise<AccessTokenClaim
       algorithms: ['HS256'],
     });
 
-    const role = payload.role;
-    if (typeof payload.sub !== 'string' || !isRole(role)) return null;
+    if (typeof payload.sub !== 'string') return null;
 
-    return { sub: payload.sub, role };
+    // Unknown permission strings are dropped rather than trusted. A token minted
+    // before a permission was renamed should lose that grant, not carry a claim
+    // nothing in this build understands.
+    const permissions = Array.isArray(payload.perms) ? payload.perms.filter(isPermission) : [];
+    const roles = Array.isArray(payload.roles)
+      ? payload.roles.filter((role): role is string => typeof role === 'string')
+      : [];
+
+    return { sub: payload.sub, permissions, roles };
   } catch {
     return null;
   }
-}
-
-function isRole(value: unknown): value is Role {
-  return value === 'ADMIN' || value === 'WAREHOUSE' || value === 'VIEWER';
 }
 
 /** 256 bits of entropy, url-safe. Returned to the client exactly once. */

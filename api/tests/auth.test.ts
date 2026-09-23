@@ -1,5 +1,6 @@
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import { login, logout, refresh, revokeAllSessions } from '../src/domains/auth/service.js';
+import { PERMISSIONS } from '../src/shared/permissions.js';
 import { verifyAccessToken } from '../src/shared/tokens.js';
 import { FIXTURE_PASSWORD, type Fixtures, prisma, seedFixtures } from './helpers.js';
 
@@ -21,14 +22,47 @@ afterAll(async () => {
 });
 
 describe('signing in', () => {
-  it('issues a working access token carrying the user’s role', async () => {
+  it('issues an access token carrying effective permissions, not a role', async () => {
     const session = await login(
       { email: fx.warehouse.email, password: FIXTURE_PASSWORD },
       noContext,
     );
 
     const claims = await verifyAccessToken(session.accessToken);
-    expect(claims).toMatchObject({ sub: fx.warehouse.id, role: 'WAREHOUSE' });
+    expect(claims?.sub).toBe(fx.warehouse.id);
+    // The role key rides along for display and audit, but authorisation reads
+    // the permissions -- so those are what must be in the token.
+    expect(claims?.roles).toContain('warehouse');
+    expect(claims?.permissions).toContain(PERMISSIONS.STOCK_RECEIVE);
+    expect(claims?.permissions).not.toContain(PERMISSIONS.PURCHASE_ORDER_CREATE);
+  });
+
+  it('reflects a role’s permission change on the next sign-in', async () => {
+    const before = await login({ email: fx.viewer.email, password: FIXTURE_PASSWORD }, noContext);
+    const beforeClaims = await verifyAccessToken(before.accessToken);
+    expect(beforeClaims?.permissions).not.toContain(PERMISSIONS.STOCK_RECEIVE);
+
+    // Grant the viewer role a new permission -- pure data, no deploy.
+    const viewerRole = await prisma.role.findFirstOrThrow({ where: { key: 'viewer' } });
+    const permission = await prisma.permission.findFirstOrThrow({
+      where: { key: PERMISSIONS.STOCK_RECEIVE },
+    });
+    await prisma.rolePermission.create({
+      data: { roleId: viewerRole.id, permissionId: permission.id },
+    });
+
+    try {
+      const after = await login({ email: fx.viewer.email, password: FIXTURE_PASSWORD }, noContext);
+      const afterClaims = await verifyAccessToken(after.accessToken);
+      expect(afterClaims?.permissions).toContain(PERMISSIONS.STOCK_RECEIVE);
+    } finally {
+      // Shared reference data: leaving this behind would widen every later test.
+      await prisma.rolePermission.delete({
+        where: {
+          roleId_permissionId: { roleId: viewerRole.id, permissionId: permission.id },
+        },
+      });
+    }
   });
 
   it('rejects a wrong password and an unknown email identically', async () => {

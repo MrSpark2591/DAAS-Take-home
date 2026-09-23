@@ -106,7 +106,12 @@ export const MeDocument = /* GraphQL */ `
       id
       name
       email
-      role
+      roles {
+        id
+        key
+        name
+      }
+      permissions
     }
   }
 `;
@@ -119,7 +124,12 @@ export const LoginDocument = /* GraphQL */ `
         id
         name
         email
-        role
+        roles {
+          id
+          key
+          name
+        }
+        permissions
       }
     }
   }
@@ -137,7 +147,12 @@ export const RefreshSessionDocument = /* GraphQL */ `
         id
         name
         email
-        role
+        roles {
+          id
+          key
+          name
+        }
+        permissions
       }
     }
   }

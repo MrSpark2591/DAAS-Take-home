@@ -28,13 +28,17 @@ Node 24 is required (`.nvmrc`, `engines`).
 Always run these from the directory shown.
 
 ```bash
-npm run setup     # root — install both packages, start Postgres, migrate, seed
-npm run dev       # root — API and web together, prefixed output, Ctrl-C stops both
+npm start         # root — everything: env files, installs, Postgres, migrate, seed, run
 ```
+
+`npm start` is idempotent: it installs only what is missing and **will not reseed** a
+database that already has users, so it is safe to run repeatedly. Reseed deliberately with
+`npm --prefix api run seed`.
 
 | Directory | Command | Purpose |
 | --- | --- | --- |
-| root | `npm run dev` | **Both services in parallel.** Use this by default. |
+| root | `npm start` | **Use this by default.** Sets everything up, then runs both services. |
+| root | `npm run dev` | Both services only, assuming setup is already done |
 | root | `npm run dev:api` / `dev:web` | One service alone, when you want its logs isolated |
 | root | `npm run db:up` / `db:down` | Postgres only |
 | root | `npm run verify` | Lint + typecheck both packages. **Run before claiming done.** |
@@ -198,6 +202,52 @@ on a small table everything looks like a seq scan and proves nothing.
 - Prisma cannot express partial, DESC-ordered or GIN indexes, so they live in migration SQL
   and the corresponding `@@index` is left out of `schema.prisma` to avoid drift.
 - Don't keep an index the planner does not choose. Verify, then keep or drop.
+
+---
+
+## Multi-tenancy
+
+Every row of business data belongs to one tenant. The filter is **injected**, not written at
+each call site — `shared/tenancy.ts` holds a Prisma client extension and an
+`AsyncLocalStorage` store, and `assertTenancyIsComplete` refuses to boot if a model is
+neither scoped nor explicitly global.
+
+Rules:
+
+- **Use `prisma` from `shared/prisma.js`.** `prismaUnscoped` exists for exactly two jobs —
+  seeding, and resolving which tenant a sign-in belongs to — and nothing else should import it.
+- **Never add `tenantId` to a read `where`.** The extension does it. If a read needs a
+  different tenant, that is a design problem, not a query problem.
+- **Writes name the tenant explicitly**, from `requireTenant()`, never from input. A missing
+  one fails the NOT NULL constraint loudly; a missing *read* filter would be silent, which is
+  why the extension guarantees reads.
+- **Raw SQL bypasses the extension.** `repository.ts` and the `FOR UPDATE` lock in
+  `service.ts` carry their own `tenant_id` predicate, and `tenancy.test.ts` fails if one is
+  removed.
+- **Uniqueness is per tenant** — `(tenant_id, code)`, not `code`. Email is the exception: it
+  is the login identifier, resolved before a tenant is known.
+
+Two traps that already cost time here, both now covered by tests:
+
+- **`AsyncLocalStorage.enterWith` in the GraphQL context does not work.** The store is gone
+  by the time resolvers run. The tenant is bound by Express middleware wrapping the request in
+  `storage.run` — which is why this is not on `startStandaloneServer`.
+- **Prisma promises are lazy.** Returning one from inside the store without awaiting it
+  dispatches the query outside the store. `withTenant` awaits internally so callers cannot
+  reintroduce it.
+
+The honest limit: this is application-level enforcement. Postgres RLS is the hardening step,
+and the README says so rather than implying the database is enforcing it.
+
+## Feature switches
+
+`shared/features.ts` holds the catalogue; `tenant_features` holds the per-tenant setting.
+**Absent means off** — match that default in the UI, or you render a page the API refuses.
+
+A feature is **not** a permission, and they are separate tables in `authorize.ts`. A
+permission asks *may this user*; a feature asks *does this tenant have it at all*. Use
+`FEATURE_GATES` for the second, and let it produce `FEATURE_DISABLED` rather than `FORBIDDEN`
+— the two are fixed by different people.
 
 ---
 

@@ -1,5 +1,9 @@
 'use client';
 
+import SearchIcon from '@mui/icons-material/Search';
+import Checkbox from '@mui/material/Checkbox';
+import FormControlLabel from '@mui/material/FormControlLabel';
+import InputAdornment from '@mui/material/InputAdornment';
 import MenuItem from '@mui/material/MenuItem';
 import Paper from '@mui/material/Paper';
 import Stack from '@mui/material/Stack';
@@ -11,32 +15,62 @@ import TableHead from '@mui/material/TableHead';
 import TableRow from '@mui/material/TableRow';
 import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { PaginationBar } from '@/components/PaginationBar';
 import { QueryState } from '@/components/QueryState';
 import { useFormOptionsQuery, useStockOnHandQuery } from '@/lib/api';
 import { formatDateTime } from '@/lib/format';
+import { useCursorPagination, useDebounced } from '@/lib/pagination';
+
+const PAGE_SIZE = 20;
 
 /**
  * The read side of receiving: proof that a receipt moved real stock. Shares the
  * `StockOnHand` cache tag with the receive mutation, so confirming a receipt
  * refreshes this page without it knowing anything about purchase orders.
+ *
+ * Every filter is applied in SQL. Searching SKUs in the browser would only ever
+ * search the page already loaded, which is wrong the moment there is more than
+ * one page.
  */
 export default function StockPage() {
   const [locationId, setLocationId] = useState('');
+  const [search, setSearch] = useState('');
+  const [inStockOnly, setInStockOnly] = useState(false);
+
+  const debouncedSearch = useDebounced(search);
+  const pagination = useCursorPagination(PAGE_SIZE);
   const options = useFormOptionsQuery();
 
+  const filter = {
+    ...(locationId ? { locationId } : {}),
+    ...(debouncedSearch.trim() ? { search: debouncedSearch.trim() } : {}),
+    ...(inStockOnly ? { inStockOnly: true } : {}),
+  };
+
   const { data, isLoading, isFetching, error, refetch } = useStockOnHandQuery({
-    locationId: locationId || null,
+    filter,
+    first: PAGE_SIZE,
+    after: pagination.after,
   });
 
-  const rows = data?.stockOnHand ?? [];
+  // Cursors belong to one result set, so a filter change has to restart paging.
+  const { reset } = pagination;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: resets the page when the filter changes
+  useEffect(() => {
+    reset();
+  }, [locationId, debouncedSearch, inStockOnly, reset]);
+
+  const connection = data?.stockOnHand;
+  const rows = connection?.nodes ?? [];
+  const hasFilters = Boolean(locationId || debouncedSearch.trim() || inStockOnly);
 
   return (
     <>
       <Stack
-        direction={{ xs: 'column', sm: 'row' }}
+        direction={{ xs: 'column', md: 'row' }}
         spacing={2}
-        sx={{ justifyContent: 'space-between', alignItems: { sm: 'center' }, mb: 3 }}
+        sx={{ justifyContent: 'space-between', alignItems: { md: 'center' }, mb: 3 }}
       >
         <div>
           <Typography variant="h1">Stock on hand</Typography>
@@ -45,21 +79,51 @@ export default function StockPage() {
           </Typography>
         </div>
 
-        <TextField
-          select
-          size="small"
-          label="Location"
-          value={locationId}
-          onChange={(event) => setLocationId(event.target.value)}
-          sx={{ minWidth: 220 }}
-        >
-          <MenuItem value="">All locations</MenuItem>
-          {(options.data?.locations ?? []).map((location) => (
-            <MenuItem key={location.id} value={location.id}>
-              {location.code} — {location.name}
-            </MenuItem>
-          ))}
-        </TextField>
+        <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} sx={{ alignItems: 'center' }}>
+          <TextField
+            size="small"
+            label="Search SKU or product"
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            sx={{ minWidth: 210 }}
+            slotProps={{
+              input: {
+                startAdornment: (
+                  <InputAdornment position="start">
+                    <SearchIcon fontSize="small" />
+                  </InputAdornment>
+                ),
+              },
+            }}
+          />
+
+          <TextField
+            select
+            size="small"
+            label="Location"
+            value={locationId}
+            onChange={(event) => setLocationId(event.target.value)}
+            sx={{ minWidth: 180 }}
+          >
+            <MenuItem value="">All locations</MenuItem>
+            {(options.data?.locations ?? []).map((location) => (
+              <MenuItem key={location.id} value={location.id}>
+                {location.code} — {location.name}
+              </MenuItem>
+            ))}
+          </TextField>
+
+          <FormControlLabel
+            control={
+              <Checkbox
+                size="small"
+                checked={inStockOnly}
+                onChange={(event) => setInStockOnly(event.target.checked)}
+              />
+            }
+            label="In stock only"
+          />
+        </Stack>
       </Stack>
 
       <QueryState
@@ -67,8 +131,12 @@ export default function StockPage() {
         error={error}
         onRetry={refetch}
         isEmpty={rows.length === 0}
-        emptyTitle="No stock on hand"
-        emptyBody="Receive a purchase order and it will show up here."
+        emptyTitle={hasFilters ? 'Nothing matches these filters' : 'No stock on hand'}
+        emptyBody={
+          hasFilters
+            ? 'Try a different location or search term.'
+            : 'Receive a purchase order and it will show up here.'
+        }
       >
         <TableContainer component={Paper} sx={{ opacity: isFetching ? 0.6 : 1 }}>
           <Table>
@@ -98,6 +166,17 @@ export default function StockPage() {
             </TableBody>
           </Table>
         </TableContainer>
+
+        <PaginationBar
+          totalCount={connection?.totalCount ?? 0}
+          shown={rows.length}
+          range={pagination.range}
+          hasPrevious={pagination.hasPrevious}
+          hasNext={connection?.pageInfo.hasNextPage ?? false}
+          onPrevious={pagination.previous}
+          onNext={() => pagination.next(connection?.pageInfo.endCursor)}
+          busy={isFetching}
+        />
       </QueryState>
     </>
   );

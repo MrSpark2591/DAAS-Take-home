@@ -236,8 +236,10 @@ model PurchaseOrder {
   createdBy User                @relation(fields: [createdById], references: [id], onDelete: Restrict)
   lines     PurchaseOrderLine[]
 
-  @@index([vendorId])
-  @@index([locationId])
+  // The single-column vendor/location indexes were replaced by partial
+  // composites on (vendor_id, id DESC) WHERE deleted_at IS NULL, which serve
+  // both the filter and the keyset in one seek. Prisma cannot express partial
+  // or DESC-ordered indexes, so they live in the migration SQL.
   @@map("purchase_orders")
 }
 
@@ -313,6 +315,7 @@ model StockOnHand {
   location Location @relation(fields: [locationId], references: [id], onDelete: Restrict)
 
   @@unique([productId, locationId], map: "stock_on_hand_product_location_key")
-  @@index([locationId])
+  // (location_id, quantity) lives in the migration SQL: it serves the location
+  // filter and the `inStockOnly` predicate together.
   @@map("stock_on_hand")
 }

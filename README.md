@@ -92,8 +92,8 @@ and the API still returns `FORBIDDEN` — the UI mirrors the rule, the server ow
 cd api && npm test
 ```
 
-29 integration tests against a real Postgres — receiving, authorisation, and the session
-lifecycle. They create and migrate a separate `daas_test` database, so they never touch your
+43 integration tests against a real Postgres — receiving, authorisation, the session
+lifecycle, and list filtering/pagination. They create and migrate a separate `daas_test` database, so they never touch your
 seeded dev data.
 
 ```bash
@@ -404,6 +404,80 @@ revoking a permission takes effect within 15 minutes, not instantly. That is the
 bounded staleness the session already accepts, and the reason the TTL is short. The fix,
 if that window mattered, is a `token_version` column checked per request, trading a
 little statelessness for immediate revocation.
+
+---
+
+## Filtering and pagination
+
+**Every filter is applied in SQL.** Nothing is fetched and narrowed in the browser, and
+nothing is fetched and narrowed in the resolver either — filters, ordering and the page
+window are composed into one statement in
+[`repository.ts`](api/src/domains/purchasing/repository.ts).
+
+That replaced a real wart: the old status filter selected *every* matching id from the
+view and then re-queried, which cannot paginate and gets slower with every PO ever raised.
+
+```graphql
+purchaseOrders(
+  filter: { status: PARTIAL, vendorId: "…", search: "1002" }
+  first: 20
+  after: "…"
+) {
+  totalCount
+  pageInfo { hasNextPage endCursor }
+  nodes { poNumber status }
+}
+```
+
+### Why keyset, not offset
+
+`OFFSET 5000` makes Postgres walk and discard 5000 rows on every request, so the last page
+is the slowest one. Worse, a row inserted while someone is paging shifts everything down —
+they see a row twice, or miss one entirely.
+
+Keyset asks "the rows after this one", which is a single index seek at any depth and is
+stable under inserts. The cost is that you cannot jump to page 37, which is why the UI
+offers next/previous rather than numbered pages. `totalCount` is still returned, so it can
+say "1–20 of 47".
+
+This is what the UUIDv7 primary keys were for: they sort by creation time, so `ORDER BY id
+DESC` is both a meaningful "newest first" and a usable keyset column with no extra index.
+
+Stock on hand is ordered by SKU instead, which is not unique — so its cursor is the
+composite `(sku, id)`, compared with a Postgres row-value predicate that an index on those
+two columns can still satisfy in one seek.
+
+Guardrails: `first` is capped at 100, cursors are opaque (a client that parses one ends up
+depending on the sort key), and `%`/`_` in a search term are escaped so a stray wildcard
+cannot quietly match everything.
+
+### Indexes built for these queries
+
+The indexes were chosen against the query plans, not guessed — and verified with `EXPLAIN`:
+
+| Query shape | Index | Plan |
+| --- | --- | --- |
+| Filter by vendor + keyset | `(vendor_id, id DESC) WHERE deleted_at IS NULL` | Index Only Scan |
+| Substring search | GIN `gin_trgm_ops` on `po_number` | Bitmap Index Scan |
+| Unfiltered list + keyset | `(id DESC) WHERE deleted_at IS NULL` | Index Only Scan |
+| Received totals view | `(purchase_order_line_id) WHERE type = 'RECEIPT'` | matches the join exactly |
+
+Two details worth naming:
+
+- **Partial on `deleted_at IS NULL`.** Every list carries that predicate and soft-deleted
+  rows are never listed, so the index holds only rows that can actually be returned.
+- **The unfiltered keyset index was tested, not assumed.** With few deleted rows the
+  planner prefers a backward scan of the primary key and the index is redundant. At 70%
+  soft-deleted — what a long-lived table looks like — it switches to the partial index,
+  because the PK scan would otherwise read and discard every dead row to fill a page. That
+  is the evidence it earns its write cost.
+
+A trigram index is needed because `ILIKE '%1002%'` has a leading wildcard: a btree can only
+seek on a known prefix, so it cannot help at all.
+
+The single-column `vendor_id` and `location_id` indexes were **dropped** — the composites
+serve those lookups from their leading column, and keeping both would cost an extra write
+per insert for no read benefit.
 
 ---
 

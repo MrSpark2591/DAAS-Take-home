@@ -1,5 +1,5 @@
 import { defineConfig } from 'vitest/config';
-import { TEST_DATABASE_URL } from './tests/database-url';
+import { TEST_DATABASE_URL } from './tests/database-url.js';
 
 /**
  * Integration tests run against a real Postgres -- the same container from

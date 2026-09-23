@@ -13,6 +13,13 @@ import type { GraphQLContext } from '../../context.js';
 import { requirePermission } from '../../shared/auth.js';
 import { PERMISSIONS } from '../../shared/permissions.js';
 import { live } from '../../shared/prisma.js';
+import {
+  inIdOrder,
+  listPurchaseOrderIds,
+  listStockOnHandIds,
+  type PurchaseOrderFilter,
+  type StockOnHandFilter,
+} from './repository.js';
 import * as service from './service.js';
 
 /**
@@ -32,37 +39,24 @@ export const resolvers = {
      * `purchase_order_status` view rather than in application memory -- the
      * list stays a single indexed query as the table grows.
      */
+    /**
+     * Filters, ordering and the keyset window are one SQL statement (see
+     * `repository.ts`); this only hydrates the ids it returns. Status is
+     * derived, so filtering on it joins the `purchase_order_status` view rather
+     * than reading a column -- but it is still one indexed query, not a fetch
+     * of everything followed by narrowing in memory.
+     */
     purchaseOrders: async (
       _p: unknown,
-      args: {
-        filter?: {
-          status?: 'OPEN' | 'PARTIAL' | 'RECEIVED' | null;
-          vendorId?: string | null;
-        } | null;
-      },
+      args: { filter?: PurchaseOrderFilter | null; first?: number | null; after?: string | null },
       { db }: Ctx,
     ) => {
-      const { status, vendorId } = args.filter ?? {};
+      const { ids, pageInfo, totalCount } = await listPurchaseOrderIds(args.filter ?? {}, args);
+      if (ids.length === 0) return { nodes: [], pageInfo, totalCount };
 
-      if (status) {
-        const rows = await db.$queryRaw<{ purchaseOrderId: string }[]>`
-          SELECT "purchase_order_id" AS "purchaseOrderId"
-          FROM "purchase_order_status"
-          WHERE "status" = ${status}
-        `;
-        const ids = rows.map((r) => r.purchaseOrderId);
-        if (ids.length === 0) return [];
-
-        return db.purchaseOrder.findMany({
-          where: { id: { in: ids }, ...(vendorId ? { vendorId } : {}), ...live },
-          orderBy: { createdAt: 'desc' },
-        });
-      }
-
-      return db.purchaseOrder.findMany({
-        where: { ...(vendorId ? { vendorId } : {}), ...live },
-        orderBy: { createdAt: 'desc' },
-      });
+      const rows = await db.purchaseOrder.findMany({ where: { id: { in: ids } } });
+      // `in` does not preserve order, so the SQL ordering is reapplied here.
+      return { nodes: inIdOrder(rows, ids), pageInfo, totalCount };
     },
 
     purchaseOrder: (_p: unknown, args: { id: string }, { db }: Ctx) =>
@@ -77,18 +71,17 @@ export const resolvers = {
     locations: (_p: unknown, _a: unknown, { db }: Ctx) =>
       db.location.findMany({ where: live, orderBy: { code: 'asc' } }),
 
-    stockOnHand: (
+    stockOnHand: async (
       _p: unknown,
-      args: { locationId?: string | null; productId?: string | null },
+      args: { filter?: StockOnHandFilter | null; first?: number | null; after?: string | null },
       { db }: Ctx,
-    ) =>
-      db.stockOnHand.findMany({
-        where: {
-          ...(args.locationId ? { locationId: args.locationId } : {}),
-          ...(args.productId ? { productId: args.productId } : {}),
-        },
-        orderBy: [{ quantity: 'desc' }],
-      }),
+    ) => {
+      const { ids, pageInfo, totalCount } = await listStockOnHandIds(args.filter ?? {}, args);
+      if (ids.length === 0) return { nodes: [], pageInfo, totalCount };
+
+      const rows = await db.stockOnHand.findMany({ where: { id: { in: ids } } });
+      return { nodes: inIdOrder(rows, ids), pageInfo, totalCount };
+    },
   },
 
   Mutation: {

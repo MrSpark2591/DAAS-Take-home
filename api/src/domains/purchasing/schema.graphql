@@ -94,9 +94,51 @@ type PurchaseOrder {
   updatedAt: DateTime!
 }
 
+"""
+Page of results, keyset-paginated.
+
+There are no page numbers: cursors walk forward from where you are, which is a
+single index seek at any depth and stays stable when rows are inserted while
+someone is paging. `totalCount` is still provided so the UI can say "1-20 of 47".
+"""
+type PageInfo {
+  hasNextPage: Boolean!
+  "Opaque. Pass it as `after` to fetch the next page."
+  endCursor: String
+}
+
+type PurchaseOrderConnection {
+  nodes: [PurchaseOrder!]!
+  pageInfo: PageInfo!
+  "Total matching the filter, ignoring pagination."
+  totalCount: Int!
+}
+
+type StockOnHandConnection {
+  nodes: [StockOnHand!]!
+  pageInfo: PageInfo!
+  totalCount: Int!
+}
+
+"""
+Every field is optional and they combine with AND. All filtering happens in
+SQL -- nothing is fetched and narrowed in memory.
+"""
 input PurchaseOrderFilter {
   status: PurchaseOrderStatus
   vendorId: ID
+  locationId: ID
+  "Case-insensitive substring of the PO number."
+  search: String
+}
+
+input StockOnHandFilter {
+  locationId: ID
+  productId: ID
+  "Case-insensitive substring of SKU or product name."
+  search: String
+  "Hides rows that have fallen to zero."
+  inStockOnly: Boolean
 }
 
 input CreatePurchaseOrderLineInput {
@@ -134,13 +176,21 @@ type ReceivePurchaseOrderResult {
 }
 
 type Query {
-  purchaseOrders(filter: PurchaseOrderFilter): [PurchaseOrder!]!
+  """
+  Purchase orders, newest first.
+
+  `first` defaults to 20 and is capped at 100. Pass `pageInfo.endCursor` back as
+  `after` to walk forward.
+  """
+  purchaseOrders(filter: PurchaseOrderFilter, first: Int, after: String): PurchaseOrderConnection!
+
   purchaseOrder(id: ID!): PurchaseOrder
   vendors: [Vendor!]!
   products: [Product!]!
   locations: [Location!]!
-  "On-hand stock across every product/location pair, optionally narrowed."
-  stockOnHand(locationId: ID, productId: ID): [StockOnHand!]!
+
+  "On-hand stock across every product/location pair, ordered by SKU."
+  stockOnHand(filter: StockOnHandFilter, first: Int, after: String): StockOnHandConnection!
 }
 
 type Mutation {

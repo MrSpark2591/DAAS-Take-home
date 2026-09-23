@@ -1,7 +1,9 @@
 'use client';
 
 import AddIcon from '@mui/icons-material/Add';
+import SearchIcon from '@mui/icons-material/Search';
 import Button from '@mui/material/Button';
+import InputAdornment from '@mui/material/InputAdornment';
 import MenuItem from '@mui/material/MenuItem';
 import Paper from '@mui/material/Paper';
 import Stack from '@mui/material/Stack';
@@ -15,13 +17,15 @@ import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { PaginationBar } from '@/components/PaginationBar';
 import { QueryState } from '@/components/QueryState';
 import { StatusChip } from '@/components/StatusChip';
 import type { PurchaseOrderStatus } from '@/generated/graphql';
-import { usePurchaseOrdersQuery } from '@/lib/api';
+import { useFormOptionsQuery, usePurchaseOrdersQuery } from '@/lib/api';
 import { formatCents, formatDate } from '@/lib/format';
 import { useAppSelector } from '@/lib/hooks';
+import { useCursorPagination, useDebounced } from '@/lib/pagination';
 import { can, PERMISSIONS } from '@/lib/session';
 
 type StatusFilter = PurchaseOrderStatus | 'ALL';
@@ -33,19 +37,49 @@ const FILTERS: { value: StatusFilter; label: string }[] = [
   { value: 'RECEIVED', label: 'Received' },
 ];
 
+const PAGE_SIZE = 20;
+
 export default function PurchaseOrdersPage() {
   const router = useRouter();
   const [status, setStatus] = useState<StatusFilter>('ALL');
+  const [vendorId, setVendorId] = useState('');
+  const [search, setSearch] = useState('');
   const user = useAppSelector((state) => state.session.user);
   const canCreate = can(user, PERMISSIONS.PURCHASE_ORDER_CREATE);
 
-  // The filter is part of the query key, so RTK Query caches each tab
-  // separately and switching back to a visited tab is instant.
+  // Debounced so typing does not fire a query per keystroke.
+  const debouncedSearch = useDebounced(search);
+  const pagination = useCursorPagination(PAGE_SIZE);
+
+  // Every filter is sent to the API; nothing is narrowed in the browser. The
+  // filter values are part of the RTK Query cache key, so each combination
+  // caches independently and returning to one is instant.
+  const filter = {
+    ...(status === 'ALL' ? {} : { status }),
+    ...(vendorId ? { vendorId } : {}),
+    ...(debouncedSearch.trim() ? { search: debouncedSearch.trim() } : {}),
+  };
+
   const { data, isLoading, isFetching, error, refetch } = usePurchaseOrdersQuery({
-    filter: status === 'ALL' ? null : { status },
+    filter,
+    first: PAGE_SIZE,
+    after: pagination.after,
   });
 
-  const orders = data?.purchaseOrders ?? [];
+  const options = useFormOptionsQuery();
+
+  // Cursors point into a specific result set, so changing a filter invalidates
+  // them -- staying on "page 3" of a list that no longer has three pages would
+  // show an empty table.
+  const { reset } = pagination;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: resets the page when the filter changes
+  useEffect(() => {
+    reset();
+  }, [status, vendorId, debouncedSearch, reset]);
+
+  const connection = data?.purchaseOrders;
+  const orders = connection?.nodes ?? [];
+  const hasFilters = status !== 'ALL' || Boolean(vendorId) || Boolean(debouncedSearch.trim());
 
   return (
     <>
@@ -61,14 +95,51 @@ export default function PurchaseOrdersPage() {
           </Typography>
         </div>
 
-        <Stack direction="row" spacing={2} sx={{ alignItems: 'center' }}>
+        <Stack
+          direction={{ xs: 'column', md: 'row' }}
+          spacing={2}
+          sx={{ alignItems: { md: 'center' } }}
+        >
+          <TextField
+            size="small"
+            label="Search PO number"
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            sx={{ minWidth: 200 }}
+            slotProps={{
+              input: {
+                startAdornment: (
+                  <InputAdornment position="start">
+                    <SearchIcon fontSize="small" />
+                  </InputAdornment>
+                ),
+              },
+            }}
+          />
+
+          <TextField
+            select
+            size="small"
+            label="Vendor"
+            value={vendorId}
+            onChange={(event) => setVendorId(event.target.value)}
+            sx={{ minWidth: 180 }}
+          >
+            <MenuItem value="">All vendors</MenuItem>
+            {(options.data?.vendors ?? []).map((vendor) => (
+              <MenuItem key={vendor.id} value={vendor.id}>
+                {vendor.name}
+              </MenuItem>
+            ))}
+          </TextField>
+
           <TextField
             select
             size="small"
             label="Status"
             value={status}
             onChange={(event) => setStatus(event.target.value as StatusFilter)}
-            sx={{ minWidth: 200 }}
+            sx={{ minWidth: 180 }}
           >
             {FILTERS.map((filter) => (
               <MenuItem key={filter.value} value={filter.value}>
@@ -95,14 +166,14 @@ export default function PurchaseOrdersPage() {
         error={error}
         onRetry={refetch}
         isEmpty={orders.length === 0}
-        emptyTitle={status === 'ALL' ? 'No purchase orders yet' : 'Nothing matches this filter'}
+        emptyTitle={hasFilters ? 'Nothing matches these filters' : 'No purchase orders yet'}
         emptyBody={
-          status === 'ALL'
-            ? 'Create one to start receiving stock against it.'
-            : 'Try a different status.'
+          hasFilters
+            ? 'Try a different vendor, status or search term.'
+            : 'Create one to start receiving stock against it.'
         }
         emptyAction={
-          status === 'ALL' && canCreate ? (
+          !hasFilters && canCreate ? (
             <Button variant="contained" component={Link} href="/purchase-orders/new">
               New purchase order
             </Button>
@@ -148,6 +219,17 @@ export default function PurchaseOrdersPage() {
             </TableBody>
           </Table>
         </TableContainer>
+
+        <PaginationBar
+          totalCount={connection?.totalCount ?? 0}
+          shown={orders.length}
+          range={pagination.range}
+          hasPrevious={pagination.hasPrevious}
+          hasNext={connection?.pageInfo.hasNextPage ?? false}
+          onPrevious={pagination.previous}
+          onNext={() => pagination.next(connection?.pageInfo.endCursor)}
+          busy={isFetching}
+        />
       </QueryState>
     </>
   );

@@ -47,12 +47,9 @@ export interface ApiError {
  * Requests go to this app's own origin, where a route handler forwards them to
  * the API. That keeps the session cookies first-party, so the browser attaches
  * them automatically and no token is ever readable by JavaScript.
- */
-/**
- * graphql-request builds a `URL` internally, which rejects a bare path, so the
- * origin has to be explicit. In the browser that is wherever the app is served
- * from -- which is the point: the request stays same-origin, so the session
- * cookies are sent automatically.
+ *
+ * The origin is explicit because graphql-request builds a `URL` internally and
+ * a bare path will not parse.
  */
 function graphqlEndpoint(): string {
   if (typeof window !== 'undefined') return `${window.location.origin}/api/graphql`;
@@ -209,7 +206,7 @@ export const api = createApi({
       // RECEIVED would linger in the OPEN tab.
       providesTags: (result) => [
         { type: 'PurchaseOrder' as const, id: 'LIST' },
-        ...(result?.purchaseOrders ?? []).map((po) => ({
+        ...(result?.purchaseOrders.nodes ?? []).map((po) => ({
           type: 'PurchaseOrder' as const,
           id: po.id,
         })),

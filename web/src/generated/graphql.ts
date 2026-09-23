@@ -113,6 +113,19 @@ export type MutationVoidPurchaseOrderArgs = {
 };
 
 /**
+ * Page of results, keyset-paginated.
+ *
+ * There are no page numbers: cursors walk forward from where you are, which is a
+ * single index seek at any depth and stays stable when rows are inserted while
+ * someone is paging. `totalCount` is still provided so the UI can say "1-20 of 47".
+ */
+export type PageInfo = {
+  /** Opaque. Pass it as `after` to fetch the next page. */
+  endCursor: Maybe<Scalars['String']['output']>;
+  hasNextPage: Scalars['Boolean']['output'];
+};
+
+/**
  * A single access right, such as `stock:receive`.
  *
  * Permissions are the unit of authorisation: every guarded resolver checks one,
@@ -150,7 +163,21 @@ export type PurchaseOrder = {
   vendor: Vendor;
 };
 
+export type PurchaseOrderConnection = {
+  nodes: Array<PurchaseOrder>;
+  pageInfo: PageInfo;
+  /** Total matching the filter, ignoring pagination. */
+  totalCount: Scalars['Int']['output'];
+};
+
+/**
+ * Every field is optional and they combine with AND. All filtering happens in
+ * SQL -- nothing is fetched and narrowed in memory.
+ */
 export type PurchaseOrderFilter = {
+  locationId?: InputMaybe<Scalars['ID']['input']>;
+  /** Case-insensitive substring of the PO number. */
+  search?: InputMaybe<Scalars['String']['input']>;
   status?: InputMaybe<PurchaseOrderStatus>;
   vendorId?: InputMaybe<Scalars['ID']['input']>;
 };
@@ -187,11 +214,17 @@ export type Query = {
   permissions: Array<Permission>;
   products: Array<Product>;
   purchaseOrder: Maybe<PurchaseOrder>;
-  purchaseOrders: Array<PurchaseOrder>;
+  /**
+   * Purchase orders, newest first.
+   *
+   * `first` defaults to 20 and is capped at 100. Pass `pageInfo.endCursor` back as
+   * `after` to walk forward.
+   */
+  purchaseOrders: PurchaseOrderConnection;
   /** Every role defined in this install. Requires the `role:manage` permission. */
   roles: Array<Role>;
-  /** On-hand stock across every product/location pair, optionally narrowed. */
-  stockOnHand: Array<StockOnHand>;
+  /** On-hand stock across every product/location pair, ordered by SKU. */
+  stockOnHand: StockOnHandConnection;
   vendors: Array<Vendor>;
 };
 
@@ -202,13 +235,16 @@ export type QueryPurchaseOrderArgs = {
 
 
 export type QueryPurchaseOrdersArgs = {
+  after?: InputMaybe<Scalars['String']['input']>;
   filter?: InputMaybe<PurchaseOrderFilter>;
+  first?: InputMaybe<Scalars['Int']['input']>;
 };
 
 
 export type QueryStockOnHandArgs = {
-  locationId?: InputMaybe<Scalars['ID']['input']>;
-  productId?: InputMaybe<Scalars['ID']['input']>;
+  after?: InputMaybe<Scalars['String']['input']>;
+  filter?: InputMaybe<StockOnHandFilter>;
+  first?: InputMaybe<Scalars['Int']['input']>;
 };
 
 export type ReceiveLineInput = {
@@ -269,6 +305,21 @@ export type StockOnHand = {
   updatedAt: Scalars['DateTime']['output'];
 };
 
+export type StockOnHandConnection = {
+  nodes: Array<StockOnHand>;
+  pageInfo: PageInfo;
+  totalCount: Scalars['Int']['output'];
+};
+
+export type StockOnHandFilter = {
+  /** Hides rows that have fallen to zero. */
+  inStockOnly?: InputMaybe<Scalars['Boolean']['input']>;
+  locationId?: InputMaybe<Scalars['ID']['input']>;
+  productId?: InputMaybe<Scalars['ID']['input']>;
+  /** Case-insensitive substring of SKU or product name. */
+  search?: InputMaybe<Scalars['String']['input']>;
+};
+
 /**
  * A person who can sign in. Identity lives in this domain; purchasing references
  * it for attribution (who raised a PO, who received stock).
@@ -297,10 +348,12 @@ export type PurchaseOrderSummaryFragment = { id: string, poNumber: string, statu
 
 export type PurchaseOrdersQueryVariables = Exact<{
   filter?: InputMaybe<PurchaseOrderFilter>;
+  first?: InputMaybe<Scalars['Int']['input']>;
+  after?: InputMaybe<Scalars['String']['input']>;
 }>;
 
 
-export type PurchaseOrdersQuery = { purchaseOrders: Array<{ id: string, poNumber: string, status: PurchaseOrderStatus, totalOrdered: number, totalReceived: number, totalCostCents: number, createdAt: string, vendor: { id: string, name: string, code: string }, location: { id: string, code: string, name: string } }> };
+export type PurchaseOrdersQuery = { purchaseOrders: { totalCount: number, pageInfo: { hasNextPage: boolean, endCursor: string | null }, nodes: Array<{ id: string, poNumber: string, status: PurchaseOrderStatus, totalOrdered: number, totalReceived: number, totalCostCents: number, createdAt: string, vendor: { id: string, name: string, code: string }, location: { id: string, code: string, name: string } }> } };
 
 export type PurchaseOrderQueryVariables = Exact<{
   id: Scalars['ID']['input'];
@@ -337,12 +390,13 @@ export type LogoutMutationVariables = Exact<{ [key: string]: never; }>;
 export type LogoutMutation = { logout: boolean };
 
 export type StockOnHandQueryVariables = Exact<{
-  locationId?: InputMaybe<Scalars['ID']['input']>;
-  productId?: InputMaybe<Scalars['ID']['input']>;
+  filter?: InputMaybe<StockOnHandFilter>;
+  first?: InputMaybe<Scalars['Int']['input']>;
+  after?: InputMaybe<Scalars['String']['input']>;
 }>;
 
 
-export type StockOnHandQuery = { stockOnHand: Array<{ id: string, quantity: number, updatedAt: string, product: { id: string, sku: string, name: string }, location: { id: string, code: string, name: string } }> };
+export type StockOnHandQuery = { stockOnHand: { totalCount: number, pageInfo: { hasNextPage: boolean, endCursor: string | null }, nodes: Array<{ id: string, quantity: number, updatedAt: string, product: { id: string, sku: string, name: string }, location: { id: string, code: string, name: string } }> } };
 
 export type CreatePurchaseOrderMutationVariables = Exact<{
   input: CreatePurchaseOrderInput;

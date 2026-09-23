@@ -29,9 +29,16 @@ const PURCHASE_ORDER_SUMMARY = /* GraphQL */ `
 `;
 
 export const PurchaseOrdersDocument = /* GraphQL */ `
-  query PurchaseOrders($filter: PurchaseOrderFilter) {
-    purchaseOrders(filter: $filter) {
-      ...PurchaseOrderSummary
+  query PurchaseOrders($filter: PurchaseOrderFilter, $first: Int, $after: String) {
+    purchaseOrders(filter: $filter, first: $first, after: $after) {
+      totalCount
+      pageInfo {
+        hasNextPage
+        endCursor
+      }
+      nodes {
+        ...PurchaseOrderSummary
+      }
     }
   }
   ${PURCHASE_ORDER_SUMMARY}
@@ -165,20 +172,27 @@ export const LogoutDocument = /* GraphQL */ `
 `;
 
 export const StockOnHandDocument = /* GraphQL */ `
-  query StockOnHand($locationId: ID, $productId: ID) {
-    stockOnHand(locationId: $locationId, productId: $productId) {
-      id
-      quantity
-      updatedAt
-      product {
-        id
-        sku
-        name
+  query StockOnHand($filter: StockOnHandFilter, $first: Int, $after: String) {
+    stockOnHand(filter: $filter, first: $first, after: $after) {
+      totalCount
+      pageInfo {
+        hasNextPage
+        endCursor
       }
-      location {
+      nodes {
         id
-        code
-        name
+        quantity
+        updatedAt
+        product {
+          id
+          sku
+          name
+        }
+        location {
+          id
+          code
+          name
+        }
       }
     }
   }

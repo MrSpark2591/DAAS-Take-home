@@ -17,6 +17,10 @@
     "sourceMap": true,
     "declaration": false
   },
-  "include": ["src/**/*.ts", "prisma/**/*.ts"],
+  // Everything, deliberately. `tests` and the root config files were outside
+  // the program, so type errors in them only surfaced when Vitest ran (esbuild
+  // strips types without checking them) and the editor had no @types/node for
+  // prisma.config.ts at all.
+  "include": ["src/**/*.ts", "prisma/**/*.ts", "tests/**/*.ts", "*.ts"],
   "exclude": ["node_modules", "dist"]
 }

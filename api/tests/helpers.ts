@@ -130,6 +130,47 @@ export async function givenPurchaseOrder(
   });
 }
 
+/**
+ * Puts stock on a shelf the way the application does: a ledger movement plus
+ * the matching projection, in one transaction.
+ *
+ * Inserting into `stock_on_hand` alone would be faster to write and would break
+ * the invariant the whole design rests on -- `ledgerMatchesProjection` asserts
+ * it globally, so one careless fixture fails unrelated tests. That is the check
+ * working, not a nuisance.
+ */
+export async function givenStock(
+  fx: Fixtures,
+  productId: string,
+  locationId: string,
+  quantity: number,
+): Promise<void> {
+  if (quantity === 0) {
+    // A zero row is legitimate -- a product received and later fully consumed.
+    // No movement is needed: SUM(no rows) is 0, which matches the projection.
+    await prisma.stockOnHand.create({ data: { productId, locationId, quantity: 0 } });
+    return;
+  }
+
+  await prisma.$transaction([
+    prisma.stockMovement.create({
+      data: {
+        productId,
+        locationId,
+        quantity,
+        type: 'ADJUSTMENT',
+        reason: 'Test fixture opening balance',
+        createdById: fx.admin.id,
+      },
+    }),
+    prisma.stockOnHand.upsert({
+      where: { productId_locationId: { productId, locationId } },
+      create: { productId, locationId, quantity },
+      update: { quantity: { increment: quantity } },
+    }),
+  ]);
+}
+
 export async function statusOf(purchaseOrderId: string) {
   const [row] = await prisma.$queryRaw<
     { status: string; totalOrdered: number; totalReceived: number }[]

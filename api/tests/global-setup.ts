@@ -1,6 +1,6 @@
 import { execSync } from 'node:child_process';
 import { PrismaClient } from '@prisma/client';
-import { TEST_DATABASE_URL } from './database-url';
+import { TEST_DATABASE_URL } from './database-url.js';
 
 /**
  * Creates the test database if it is not there, then applies the checked-in

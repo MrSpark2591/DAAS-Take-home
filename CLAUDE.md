@@ -159,6 +159,38 @@ every line carries the same `requestId` and a failure can be traced end to end.
 
 ---
 
+## Lists: filtering and pagination
+
+**All filtering is server-side.** If you find yourself calling `.filter()` on a result set
+in a component, stop — it only filters the page already loaded, which is wrong as soon as
+there is more than one page. Add the field to the GraphQL filter input and to
+`repository.ts` instead.
+
+- Filters, ordering and the keyset window compose into **one** SQL statement. Never fetch
+  a set of ids and then re-query to narrow it.
+- Build SQL with `Prisma.sql` / `Prisma.join`, never string interpolation. Escape `%` and
+  `_` in anything that reaches a `LIKE`.
+- Pagination is keyset, not offset. Fetch `limit + 1` and let `buildPage` derive
+  `hasNextPage`; do not add a second COUNT for it.
+- `findMany({ where: { id: { in: ids } } })` does **not** preserve order — pass the result
+  through `inIdOrder` or the SQL sort is silently discarded.
+- Changing a filter must reset pagination. A cursor belongs to one result set.
+
+### Indexes
+
+New query shapes need indexes built for them. Check the plan before and after with
+`EXPLAIN (ANALYZE, COSTS OFF)` against enough rows for the planner to have a real choice —
+on a small table everything looks like a seq scan and proves nothing.
+
+- Filter column + sort column belong in **one** index, in that order.
+- Partial on `deleted_at IS NULL` where the query always carries that predicate.
+- Leading-wildcard `ILIKE` needs a trigram GIN index; a btree cannot serve it.
+- Prisma cannot express partial, DESC-ordered or GIN indexes, so they live in migration SQL
+  and the corresponding `@@index` is left out of `schema.prisma` to avoid drift.
+- Don't keep an index the planner does not choose. Verify, then keep or drop.
+
+---
+
 ## Layering
 
 ```

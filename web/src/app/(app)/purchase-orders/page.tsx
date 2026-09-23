@@ -25,7 +25,7 @@ import type { PurchaseOrderStatus } from '@/generated/graphql';
 import { useFormOptionsQuery, usePurchaseOrdersQuery } from '@/lib/api';
 import { formatCents, formatDate } from '@/lib/format';
 import { useAppSelector } from '@/lib/hooks';
-import { useCursorPagination, useDebounced } from '@/lib/pagination';
+import { MIN_SEARCH_CHARS, useCursorPagination, useSearchTerm } from '@/lib/pagination';
 import { can, PERMISSIONS } from '@/lib/session';
 
 type StatusFilter = PurchaseOrderStatus | 'ALL';
@@ -47,8 +47,9 @@ export default function PurchaseOrdersPage() {
   const user = useAppSelector((state) => state.session.user);
   const canCreate = can(user, PERMISSIONS.PURCHASE_ORDER_CREATE);
 
-  // Debounced so typing does not fire a query per keystroke.
-  const debouncedSearch = useDebounced(search);
+  // Debounced, and held back below three characters, so typing fires one
+  // query when the term is worth running -- not one per keystroke.
+  const { applied: appliedSearch, pending: searchPending } = useSearchTerm(search);
   const pagination = useCursorPagination(PAGE_SIZE);
 
   // Every filter is sent to the API; nothing is narrowed in the browser. The
@@ -57,7 +58,7 @@ export default function PurchaseOrdersPage() {
   const filter = {
     ...(status === 'ALL' ? {} : { status }),
     ...(vendorId ? { vendorId } : {}),
-    ...(debouncedSearch.trim() ? { search: debouncedSearch.trim() } : {}),
+    ...(appliedSearch ? { search: appliedSearch } : {}),
   };
 
   const { data, isLoading, isFetching, error, refetch } = usePurchaseOrdersQuery({
@@ -75,11 +76,11 @@ export default function PurchaseOrdersPage() {
   // biome-ignore lint/correctness/useExhaustiveDependencies: resets the page when the filter changes
   useEffect(() => {
     reset();
-  }, [status, vendorId, debouncedSearch, reset]);
+  }, [status, vendorId, appliedSearch, reset]);
 
   const connection = data?.purchaseOrders;
   const orders = connection?.nodes ?? [];
-  const hasFilters = status !== 'ALL' || Boolean(vendorId) || Boolean(debouncedSearch.trim());
+  const hasFilters = status !== 'ALL' || Boolean(vendorId) || Boolean(appliedSearch);
 
   return (
     <>
@@ -105,6 +106,9 @@ export default function PurchaseOrdersPage() {
             label="Search PO number"
             value={search}
             onChange={(event) => setSearch(event.target.value)}
+            helperText={
+              searchPending ? `Keep typing — ${MIN_SEARCH_CHARS} characters minimum` : ' '
+            }
             sx={{ minWidth: 200 }}
             slotProps={{
               input: {

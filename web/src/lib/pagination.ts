@@ -67,3 +67,24 @@ export function useDebounced<T>(value: T, delayMs = 300): T {
 
   return debounced;
 }
+
+/**
+ * Below this, a search term matches so much of the table that the query is
+ * neither useful to read nor cheap to run -- a single character against a
+ * trigram index is close to a full scan.
+ */
+export const MIN_SEARCH_CHARS = 3;
+
+/**
+ * Turns raw input into the term actually sent to the API: debounced, trimmed,
+ * and withheld until it is long enough to be worth a round trip.
+ *
+ * `pending` is what tells the UI to say so. Without it a short term looks like
+ * a search returning everything, rather than a search that has not run yet.
+ */
+export function useSearchTerm(value: string, minChars = MIN_SEARCH_CHARS) {
+  const term = useDebounced(value).trim();
+  const applied = term.length >= minChars ? term : '';
+
+  return { applied, pending: term.length > 0 && term.length < minChars };
+}

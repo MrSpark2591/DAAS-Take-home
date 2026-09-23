@@ -22,7 +22,7 @@ import { QueryState } from '@/components/QueryState';
 import { useFormOptionsQuery, useStockOnHandQuery } from '@/lib/api';
 import { formatDateTime } from '@/lib/format';
 import { useAppSelector } from '@/lib/hooks';
-import { useCursorPagination, useDebounced } from '@/lib/pagination';
+import { MIN_SEARCH_CHARS, useCursorPagination, useSearchTerm } from '@/lib/pagination';
 import { FEATURES, hasFeature } from '@/lib/session';
 
 const PAGE_SIZE = 20;
@@ -46,13 +46,13 @@ export default function StockPage() {
   const [search, setSearch] = useState('');
   const [inStockOnly, setInStockOnly] = useState(false);
 
-  const debouncedSearch = useDebounced(search);
+  const { applied: appliedSearch, pending: searchPending } = useSearchTerm(search);
   const pagination = useCursorPagination(PAGE_SIZE);
   const options = useFormOptionsQuery();
 
   const filter = {
     ...(locationId ? { locationId } : {}),
-    ...(debouncedSearch.trim() ? { search: debouncedSearch.trim() } : {}),
+    ...(appliedSearch ? { search: appliedSearch } : {}),
     ...(inStockOnly ? { inStockOnly: true } : {}),
   };
 
@@ -68,11 +68,11 @@ export default function StockPage() {
   // biome-ignore lint/correctness/useExhaustiveDependencies: resets the page when the filter changes
   useEffect(() => {
     reset();
-  }, [locationId, debouncedSearch, inStockOnly, reset]);
+  }, [locationId, appliedSearch, inStockOnly, reset]);
 
   const connection = data?.stockOnHand;
   const rows = connection?.nodes ?? [];
-  const hasFilters = Boolean(locationId || debouncedSearch.trim() || inStockOnly);
+  const hasFilters = Boolean(locationId || appliedSearch || inStockOnly);
 
   if (!enabled) {
     return (
@@ -108,6 +108,9 @@ export default function StockPage() {
             label="Search SKU or product"
             value={search}
             onChange={(event) => setSearch(event.target.value)}
+            helperText={
+              searchPending ? `Keep typing — ${MIN_SEARCH_CHARS} characters minimum` : ' '
+            }
             sx={{ minWidth: 210 }}
             slotProps={{
               input: {

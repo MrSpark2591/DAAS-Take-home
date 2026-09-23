@@ -24,6 +24,7 @@ import { formatDateTime } from '@/lib/format';
 import { useAppSelector } from '@/lib/hooks';
 import { MIN_SEARCH_CHARS, useCursorPagination, useSearchTerm } from '@/lib/pagination';
 import { FEATURES, hasFeature } from '@/lib/session';
+import { searchFieldSx } from '@/lib/theme';
 
 const PAGE_SIZE = 20;
 
@@ -109,9 +110,9 @@ export default function StockPage() {
             value={search}
             onChange={(event) => setSearch(event.target.value)}
             helperText={
-              searchPending ? `Keep typing — ${MIN_SEARCH_CHARS} characters minimum` : ' '
+              searchPending ? `Keep typing — ${MIN_SEARCH_CHARS} characters minimum` : null
             }
-            sx={{ minWidth: 210 }}
+            sx={{ ...searchFieldSx, minWidth: 210 }}
             slotProps={{
               input: {
                 startAdornment: (
@@ -148,6 +149,9 @@ export default function StockPage() {
               />
             }
             label="In stock only"
+            // Last in the row, so it is the control flexbox shrinks first --
+            // which wraps a three-word label onto three lines.
+            sx={{ flexShrink: 0 }}
           />
         </Stack>
       </Stack>

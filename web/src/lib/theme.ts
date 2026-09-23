@@ -61,3 +61,24 @@ export const theme = createTheme({
     },
   },
 });
+
+/**
+ * Search field in a filter toolbar.
+ *
+ * The "keep typing" hint has to appear without resizing the field: the toolbar
+ * centres its controls, so a helper line added to the flow lifts the input out
+ * of alignment with the selects next to it. Taking the hint out of the flow
+ * lets it come and go while the row stays still.
+ */
+export const searchFieldSx = {
+  position: 'relative',
+  '& .MuiFormHelperText-root': {
+    position: 'absolute',
+    top: '100%',
+    m: 0,
+    mt: 0.5,
+    // Out of the flow, it would otherwise be painted under the results card
+    // that follows it in the document.
+    zIndex: 1,
+  },
+} as const;

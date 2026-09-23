@@ -27,6 +27,7 @@ import { formatCents, formatDate } from '@/lib/format';
 import { useAppSelector } from '@/lib/hooks';
 import { MIN_SEARCH_CHARS, useCursorPagination, useSearchTerm } from '@/lib/pagination';
 import { can, PERMISSIONS } from '@/lib/session';
+import { searchFieldSx } from '@/lib/theme';
 
 type StatusFilter = PurchaseOrderStatus | 'ALL';
 
@@ -107,9 +108,9 @@ export default function PurchaseOrdersPage() {
             value={search}
             onChange={(event) => setSearch(event.target.value)}
             helperText={
-              searchPending ? `Keep typing — ${MIN_SEARCH_CHARS} characters minimum` : ' '
+              searchPending ? `Keep typing — ${MIN_SEARCH_CHARS} characters minimum` : null
             }
-            sx={{ minWidth: 200 }}
+            sx={{ ...searchFieldSx, minWidth: 200 }}
             slotProps={{
               input: {
                 startAdornment: (
@@ -158,6 +159,9 @@ export default function PurchaseOrdersPage() {
               startIcon={<AddIcon />}
               component={Link}
               href="/purchase-orders/new"
+              // The fields ahead of it hold their minWidth, so the button is
+              // the only control flexbox can shrink -- and "New PO" wraps.
+              sx={{ flexShrink: 0 }}
             >
               New PO
             </Button>

@@ -14,6 +14,12 @@
  * Naming is `resource:action`, lower snake for the resource. Keep it coarse
  * enough to stay readable in a UI and fine enough that a role can be assembled
  * without granting more than intended.
+ *
+ * Every entry here gates a real operation. A permission that grants nothing is
+ * worse than an absent one: it advertises a capability that does not exist, and
+ * an administrator who grants it has been misled about what they just allowed.
+ * `assertPolicyIsComplete` catches the opposite mistake -- an operation with no
+ * permission -- at boot.
  */
 
 export const PERMISSIONS = {
@@ -22,9 +28,6 @@ export const PERMISSIONS = {
   PURCHASE_ORDER_VOID: 'purchase_order:void',
   STOCK_READ: 'stock:read',
   STOCK_RECEIVE: 'stock:receive',
-  /** Reserved for the sprint-2 adjust/transfer work; no resolver uses it yet. */
-  STOCK_ADJUST: 'stock:adjust',
-  USER_READ: 'user:read',
   ROLE_MANAGE: 'role:manage',
 } as const;
 
@@ -36,8 +39,6 @@ export const PERMISSION_DESCRIPTIONS: Record<Permission, string> = {
   [PERMISSIONS.PURCHASE_ORDER_VOID]: 'Void a purchase order that has no receipts',
   [PERMISSIONS.STOCK_READ]: 'View on-hand stock and the movement ledger',
   [PERMISSIONS.STOCK_RECEIVE]: 'Receive stock against a purchase order',
-  [PERMISSIONS.STOCK_ADJUST]: 'Adjust or transfer stock outside of receiving',
-  [PERMISSIONS.USER_READ]: 'View users and their roles',
   [PERMISSIONS.ROLE_MANAGE]: 'Create roles and change what they grant',
 };
 
@@ -72,7 +73,6 @@ export const SYSTEM_ROLES: SystemRoleDefinition[] = [
       PERMISSIONS.PURCHASE_ORDER_READ,
       PERMISSIONS.STOCK_READ,
       PERMISSIONS.STOCK_RECEIVE,
-      PERMISSIONS.STOCK_ADJUST,
     ],
   },
   {

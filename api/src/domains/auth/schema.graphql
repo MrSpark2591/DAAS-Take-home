@@ -29,6 +29,20 @@ type Role {
 }
 
 """
+The organisation a user belongs to. All their data lives inside it.
+"""
+type Tenant {
+  id: ID!
+  slug: String!
+  name: String!
+  """
+  Feature keys switched on for this organisation. Absent means off, so the UI
+  should treat anything not listed as unavailable rather than assuming.
+  """
+  features: [String!]!
+}
+
+"""
 A person who can sign in. Identity lives in this domain; purchasing references
 it for attribution (who raised a PO, who received stock).
 """
@@ -36,6 +50,10 @@ type User {
   id: ID!
   name: String!
   email: String!
+  """
+  The organisation this user belongs to.
+  """
+  tenant: Tenant!
   """
   Every role held. A user may hold several.
   """

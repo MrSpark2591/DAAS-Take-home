@@ -113,6 +113,12 @@ export const MeDocument = /* GraphQL */ `
       id
       name
       email
+      tenant {
+        id
+        slug
+        name
+        features
+      }
       roles {
         id
         key
@@ -131,6 +137,12 @@ export const LoginDocument = /* GraphQL */ `
         id
         name
         email
+        tenant {
+          id
+          slug
+          name
+          features
+        }
         roles {
           id
           key
@@ -154,6 +166,12 @@ export const RefreshSessionDocument = /* GraphQL */ `
         id
         name
         email
+        tenant {
+          id
+          slug
+          name
+          features
+        }
         roles {
           id
           key

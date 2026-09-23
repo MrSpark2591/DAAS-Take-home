@@ -23,9 +23,12 @@
   },
   "dependencies": {
     "@apollo/server": "^5.0.0",
+    "@as-integrations/express5": "^1.1.2",
     "@graphql-tools/schema": "^10.1.1",
     "@prisma/client": "^6.16.2",
+    "cors": "^2.8.6",
     "dataloader": "^2.2.3",
+    "express": "^5.2.1",
     "graphql": "^16.11.0",
     "graphql-scalars": "^1.24.2",
     "jose": "^6.2.12",
@@ -34,6 +37,8 @@
     "zod": "^3.25.76"
   },
   "devDependencies": {
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.6",
     "@types/node": "^22.15.3",
     "prisma": "^6.16.2",
     "tsx": "^4.19.3",

@@ -12,6 +12,7 @@ import { PERMISSIONS, type Permission } from '../src/shared/permissions.js';
 
 const actorWith = (...permissions: Permission[]): Actor => ({
   id: 'test-user',
+  tenantId: 'test-tenant',
   permissions: new Set(permissions),
   roles: ['test'],
 });

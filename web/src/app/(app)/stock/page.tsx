@@ -1,6 +1,7 @@
 'use client';
 
 import SearchIcon from '@mui/icons-material/Search';
+import Box from '@mui/material/Box';
 import Checkbox from '@mui/material/Checkbox';
 import FormControlLabel from '@mui/material/FormControlLabel';
 import InputAdornment from '@mui/material/InputAdornment';
@@ -20,7 +21,9 @@ import { PaginationBar } from '@/components/PaginationBar';
 import { QueryState } from '@/components/QueryState';
 import { useFormOptionsQuery, useStockOnHandQuery } from '@/lib/api';
 import { formatDateTime } from '@/lib/format';
+import { useAppSelector } from '@/lib/hooks';
 import { useCursorPagination, useDebounced } from '@/lib/pagination';
+import { FEATURES, hasFeature } from '@/lib/session';
 
 const PAGE_SIZE = 20;
 
@@ -34,6 +37,11 @@ const PAGE_SIZE = 20;
  * one page.
  */
 export default function StockPage() {
+  // Hiding the nav entry is not enough -- someone can still type the URL. The
+  // API refuses either way; this just makes the refusal legible.
+  const user = useAppSelector((state) => state.session.user);
+  const enabled = hasFeature(user, FEATURES.STOCK_VIEW);
+
   const [locationId, setLocationId] = useState('');
   const [search, setSearch] = useState('');
   const [inStockOnly, setInStockOnly] = useState(false);
@@ -48,11 +56,12 @@ export default function StockPage() {
     ...(inStockOnly ? { inStockOnly: true } : {}),
   };
 
-  const { data, isLoading, isFetching, error, refetch } = useStockOnHandQuery({
-    filter,
-    first: PAGE_SIZE,
-    after: pagination.after,
-  });
+  const { data, isLoading, isFetching, error, refetch } = useStockOnHandQuery(
+    { filter, first: PAGE_SIZE, after: pagination.after },
+    // Do not call an endpoint the tenant is not entitled to; it would only
+    // return FEATURE_DISABLED and light up the error state.
+    { skip: !enabled },
+  );
 
   // Cursors belong to one result set, so a filter change has to restart paging.
   const { reset } = pagination;
@@ -64,6 +73,20 @@ export default function StockPage() {
   const connection = data?.stockOnHand;
   const rows = connection?.nodes ?? [];
   const hasFilters = Boolean(locationId || debouncedSearch.trim() || inStockOnly);
+
+  if (!enabled) {
+    return (
+      <Box sx={{ py: 8, textAlign: 'center' }}>
+        <Typography variant="h1" gutterBottom>
+          Stock is not enabled
+        </Typography>
+        <Typography color="text.secondary">
+          Stock visibility is switched off for {user?.tenant.name ?? 'your organisation'}. Talk to
+          your account manager if you need it.
+        </Typography>
+      </Box>
+    );
+  }
 
   return (
     <>

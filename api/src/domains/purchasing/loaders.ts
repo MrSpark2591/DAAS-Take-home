@@ -4,6 +4,7 @@ import type {
   Product,
   Role,
   StockMovement,
+  Tenant,
   User,
   Vendor,
 } from '@prisma/client';
@@ -155,6 +156,31 @@ export function createLoaders(db: Tx) {
       return roleIds.map((id) =>
         (grouped.get(id) ?? []).sort((a, b) => a.key.localeCompare(b.key)),
       );
+    }),
+
+    /**
+     * Tenants and their features are global tables, so the scope extension
+     * leaves them alone and these resolve for any request -- including a login,
+     * which has no tenant context yet.
+     */
+    tenantById: new DataLoader<string, Tenant | null>(async (ids) => {
+      const rows = await db.tenant.findMany({ where: { id: { in: [...ids] } } });
+      return byId(rows, ids);
+    }),
+
+    featuresByTenantId: new DataLoader<string, string[]>(async (tenantIds) => {
+      const rows = await db.tenantFeature.findMany({
+        where: { tenantId: { in: [...tenantIds] }, enabled: true },
+        select: { tenantId: true, featureKey: true },
+      });
+
+      const grouped = new Map<string, string[]>();
+      for (const row of rows) {
+        const bucket = grouped.get(row.tenantId);
+        if (bucket) bucket.push(row.featureKey);
+        else grouped.set(row.tenantId, [row.featureKey]);
+      }
+      return tenantIds.map((id) => (grouped.get(id) ?? []).sort());
     }),
 
     stockOnHandByProductId: new DataLoader(async (productIds: readonly string[]) => {

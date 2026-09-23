@@ -320,6 +320,18 @@ export type StockOnHandFilter = {
   search?: InputMaybe<Scalars['String']['input']>;
 };
 
+/** The organisation a user belongs to. All their data lives inside it. */
+export type Tenant = {
+  /**
+   * Feature keys switched on for this organisation. Absent means off, so the UI
+   * should treat anything not listed as unavailable rather than assuming.
+   */
+  features: Array<Scalars['String']['output']>;
+  id: Scalars['ID']['output'];
+  name: Scalars['String']['output'];
+  slug: Scalars['String']['output'];
+};
+
 /**
  * A person who can sign in. Identity lives in this domain; purchasing references
  * it for attribution (who raised a PO, who received stock).
@@ -335,6 +347,8 @@ export type User = {
   permissions: Array<Scalars['String']['output']>;
   /** Every role held. A user may hold several. */
   roles: Array<Role>;
+  /** The organisation this user belongs to. */
+  tenant: Tenant;
 };
 
 export type Vendor = {
@@ -370,19 +384,19 @@ export type FormOptionsQuery = { vendors: Array<{ id: string, code: string, name
 export type MeQueryVariables = Exact<{ [key: string]: never; }>;
 
 
-export type MeQuery = { me: { id: string, name: string, email: string, permissions: Array<string>, roles: Array<{ id: string, key: string, name: string }> } | null };
+export type MeQuery = { me: { id: string, name: string, email: string, permissions: Array<string>, tenant: { id: string, slug: string, name: string, features: Array<string> }, roles: Array<{ id: string, key: string, name: string }> } | null };
 
 export type LoginMutationVariables = Exact<{
   input: LoginInput;
 }>;
 
 
-export type LoginMutation = { login: { expiresIn: number, user: { id: string, name: string, email: string, permissions: Array<string>, roles: Array<{ id: string, key: string, name: string }> } } };
+export type LoginMutation = { login: { expiresIn: number, user: { id: string, name: string, email: string, permissions: Array<string>, tenant: { id: string, slug: string, name: string, features: Array<string> }, roles: Array<{ id: string, key: string, name: string }> } } };
 
 export type RefreshSessionMutationVariables = Exact<{ [key: string]: never; }>;
 
 
-export type RefreshSessionMutation = { refreshSession: { expiresIn: number, user: { id: string, name: string, email: string, permissions: Array<string>, roles: Array<{ id: string, key: string, name: string }> } } };
+export type RefreshSessionMutation = { refreshSession: { expiresIn: number, user: { id: string, name: string, email: string, permissions: Array<string>, tenant: { id: string, slug: string, name: string, features: Array<string> }, roles: Array<{ id: string, key: string, name: string }> } } };
 
 export type LogoutMutationVariables = Exact<{ [key: string]: never; }>;
 

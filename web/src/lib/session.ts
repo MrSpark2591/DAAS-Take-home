@@ -20,10 +20,19 @@ export interface SessionRole {
   name: string;
 }
 
+export interface SessionTenant {
+  id: string;
+  slug: string;
+  name: string;
+  /** Feature keys switched on. Absent means off. */
+  features: string[];
+}
+
 export interface SessionUser {
   id: string;
   name: string;
   email: string;
+  tenant: SessionTenant;
   roles: SessionRole[];
   /** Effective permissions: the union across every role held. */
   permissions: string[];
@@ -71,8 +80,6 @@ export const PERMISSIONS = {
   PURCHASE_ORDER_VOID: 'purchase_order:void',
   STOCK_READ: 'stock:read',
   STOCK_RECEIVE: 'stock:receive',
-  STOCK_ADJUST: 'stock:adjust',
-  USER_READ: 'user:read',
   ROLE_MANAGE: 'role:manage',
 } as const;
 
@@ -85,3 +92,25 @@ export type Permission = (typeof PERMISSIONS)[keyof typeof PERMISSIONS];
  */
 export const can = (user: SessionUser | null | undefined, permission: Permission): boolean =>
   user?.permissions.includes(permission) ?? false;
+
+/**
+ * Feature keys, mirroring `api/src/shared/features.ts`.
+ *
+ * Deliberately separate from permissions. A permission asks *may this user*; a
+ * feature asks *does this organisation have it at all*. The UI needs both,
+ * because something switched off for the tenant should disappear rather than
+ * look like something the user could be granted.
+ */
+export const FEATURES = {
+  STOCK_VIEW: 'stock.view',
+} as const;
+
+export type Feature = (typeof FEATURES)[keyof typeof FEATURES];
+
+/**
+ * Off unless switched on. Matching the server's default matters: if the UI
+ * assumed "on" it would render a page the API refuses, which reads as a bug
+ * rather than as a feature the customer does not have.
+ */
+export const hasFeature = (user: SessionUser | null | undefined, feature: Feature): boolean =>
+  user?.tenant.features.includes(feature) ?? false;

@@ -41,6 +41,12 @@ function secret(): Uint8Array {
 export interface AccessTokenClaims {
   sub: string;
   /**
+   * The tenant this session belongs to. Carried in the token so a request can
+   * never be steered at another tenant by a parameter -- the only source is the
+   * signed claim.
+   */
+  tenantId: string;
+  /**
    * The user's effective permissions, flattened from every role they hold.
    *
    * Carrying these in the token is what keeps authorisation free of a database
@@ -54,7 +60,11 @@ export interface AccessTokenClaims {
 }
 
 export async function signAccessToken(claims: AccessTokenClaims): Promise<string> {
-  return await new SignJWT({ perms: claims.permissions, roles: claims.roles })
+  return await new SignJWT({
+    tid: claims.tenantId,
+    perms: claims.permissions,
+    roles: claims.roles,
+  })
     .setProtectedHeader({ alg: 'HS256', typ: 'JWT' })
     .setSubject(claims.sub)
     .setIssuer(ISSUER)
@@ -78,7 +88,7 @@ export async function verifyAccessToken(token: string): Promise<AccessTokenClaim
       algorithms: ['HS256'],
     });
 
-    if (typeof payload.sub !== 'string') return null;
+    if (typeof payload.sub !== 'string' || typeof payload.tid !== 'string') return null;
 
     // Unknown permission strings are dropped rather than trusted. A token minted
     // before a permission was renamed should lose that grant, not carry a claim
@@ -88,7 +98,7 @@ export async function verifyAccessToken(token: string): Promise<AccessTokenClaim
       ? payload.roles.filter((role): role is string => typeof role === 'string')
       : [];
 
-    return { sub: payload.sub, permissions, roles };
+    return { sub: payload.sub, tenantId: payload.tid, permissions, roles };
   } catch {
     return null;
   }

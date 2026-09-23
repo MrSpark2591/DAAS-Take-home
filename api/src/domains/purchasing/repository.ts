@@ -6,6 +6,7 @@ import {
   resolvePageArgs,
 } from '../../shared/pagination.js';
 import { prisma } from '../../shared/prisma.js';
+import { requireTenant } from '../../shared/tenancy.js';
 
 /**
  * List queries that SQL has to answer.
@@ -41,7 +42,13 @@ export interface ListResult<T> {
  * UI shows can never disagree with the rows it lists.
  */
 function purchaseOrderConditions(filter: PurchaseOrderFilter): Prisma.Sql {
-  const conditions: Prisma.Sql[] = [Prisma.sql`po."deleted_at" IS NULL`];
+  // Raw SQL bypasses the tenant extension, so the predicate is added by hand
+  // here -- and first, so it is impossible to read this function and miss it.
+  // `listing.test.ts` fails if either list ever returns another tenant's rows.
+  const conditions: Prisma.Sql[] = [
+    Prisma.sql`po."tenant_id" = ${requireTenant().tenantId}::uuid`,
+    Prisma.sql`po."deleted_at" IS NULL`,
+  ];
 
   // Status lives in a view because it is derived from the ledger, so filtering
   // on it is a join rather than a column comparison -- but it is still one
@@ -109,7 +116,11 @@ export interface StockOnHandFilter {
 }
 
 function stockConditions(filter: StockOnHandFilter): Prisma.Sql {
-  const conditions: Prisma.Sql[] = [Prisma.sql`p."deleted_at" IS NULL`];
+  // As above: the extension cannot reach raw SQL, so the tenant is explicit.
+  const conditions: Prisma.Sql[] = [
+    Prisma.sql`soh."tenant_id" = ${requireTenant().tenantId}::uuid`,
+    Prisma.sql`p."deleted_at" IS NULL`,
+  ];
 
   if (filter.locationId)
     conditions.push(Prisma.sql`soh."location_id" = ${filter.locationId}::uuid`);

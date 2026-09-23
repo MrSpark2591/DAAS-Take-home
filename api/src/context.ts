@@ -3,8 +3,10 @@ import type { Logger } from 'pino';
 import { ACCESS_COOKIE, parseCookies, REFRESH_COOKIE } from './domains/auth/cookies.js';
 import { createLoaders, type Loaders } from './domains/purchasing/loaders.js';
 import { type Actor, bearerFromHeader, resolveActor } from './shared/auth.js';
+import type { Feature } from './shared/features.js';
+import { isFeature } from './shared/features.js';
 import { requestLogger, resolveRequestId } from './shared/logger.js';
-import { prisma } from './shared/prisma.js';
+import { prisma, prismaUnscoped } from './shared/prisma.js';
 
 export interface GraphQLContext {
   db: typeof prisma;
@@ -21,6 +23,24 @@ export interface GraphQLContext {
   requestId: string;
   /** Request-scoped logger. Prefer this over the root logger in resolvers. */
   log: Logger;
+  /** Null when anonymous. Taken from the signed token, never from a parameter. */
+  tenantId: string | null;
+  /** Features this tenant has switched on. Absent means off. */
+  features: ReadonlySet<Feature>;
+}
+
+/**
+ * Resolves the actor from a request's cookies or Authorization header.
+ *
+ * Exported so the tenant middleware can establish the tenant *before* GraphQL
+ * executes. Verification is a signature check with no database round trip, so
+ * doing it here and again in `createContext` costs nothing measurable and keeps
+ * both paths honest about their own input.
+ */
+export async function resolveRequestActor(req: IncomingMessage): Promise<Actor | null> {
+  const cookies = parseCookies(req.headers.cookie);
+  const accessToken = bearerFromHeader(req.headers.authorization) ?? cookies[ACCESS_COOKIE] ?? null;
+  return await resolveActor(accessToken);
 }
 
 export async function createContext({
@@ -43,6 +63,27 @@ export async function createContext({
   const requestId = resolveRequestId(req.headers['x-request-id']);
   const ipAddress = clientIp(req);
 
+  // Bind the tenant to this request's async chain before any resolver runs, so
+  // every Prisma query it issues is scoped without the caller doing anything.
+  const tenantId = actor?.tenantId ?? null;
+  const features = new Set<Feature>();
+
+  if (tenantId) {
+    // The tenant is already bound by the middleware in index.ts, which wraps the
+    // whole request. Here we only read what it switched on.
+    //
+    // Unscoped client: tenant_features is a tenancy table, global by design and
+    // filtered explicitly.
+    const enabled = await prismaUnscoped.tenantFeature.findMany({
+      where: { tenantId, enabled: true },
+      select: { featureKey: true },
+    });
+    for (const row of enabled) {
+      // A key the build does not recognise is ignored rather than trusted.
+      if (isFeature(row.featureKey)) features.add(row.featureKey);
+    }
+  }
+
   return {
     db: prisma,
     actor,
@@ -54,7 +95,14 @@ export async function createContext({
     userAgent: req.headers['user-agent'] ?? null,
     ipAddress,
     requestId,
-    log: requestLogger({ requestId, userId: actor?.id ?? null, ip: ipAddress }),
+    log: requestLogger({
+      requestId,
+      userId: actor?.id ?? null,
+      tenantId,
+      ip: ipAddress,
+    }),
+    tenantId,
+    features,
   };
 }
 

@@ -4,6 +4,7 @@ import type { Actor } from '../../shared/auth.js';
 import { badInput, conflict, notFound, overReceipt } from '../../shared/errors.js';
 import { uuidv7 } from '../../shared/id.js';
 import { live, prisma, type Tx } from '../../shared/prisma.js';
+import { requireTenant } from '../../shared/tenancy.js';
 
 /**
  * All purchasing writes live here. Resolvers do auth and shape translation;
@@ -106,6 +107,13 @@ export async function createPurchaseOrder(actor: Actor, rawInput: unknown): Prom
     try {
       return await tx.purchaseOrder.create({
         data: {
+          // Writes name the tenant explicitly, from the request's context and
+          // never from input. Reads are the ones where forgetting is dangerous
+          // -- a missing filter leaks another tenant's data silently -- so the
+          // extension guarantees those. A missing tenant on a write would fail
+          // the NOT NULL constraint immediately, which is loud rather than
+          // silent, and being explicit here keeps the types honest.
+          tenantId: requireTenant().tenantId,
           poNumber: input.poNumber,
           vendorId: input.vendorId,
           locationId: input.locationId,
@@ -152,6 +160,8 @@ export async function receivePurchaseOrder(
     );
   }
 
+  const { tenantId } = requireTenant();
+
   return await prisma.$transaction(
     async (tx) => {
       // Serialise receipts against this PO. Two warehouse staff receiving the
@@ -161,7 +171,9 @@ export async function receivePurchaseOrder(
       // concurrent.
       const locked = await tx.$queryRaw<{ id: string }[]>`
         SELECT "id" FROM "purchase_orders"
-        WHERE "id" = ${input.purchaseOrderId}::uuid AND "deleted_at" IS NULL
+        WHERE "id" = ${input.purchaseOrderId}::uuid
+          AND "tenant_id" = ${tenantId}::uuid
+          AND "deleted_at" IS NULL
         FOR UPDATE
       `;
       if (locked.length === 0) {
@@ -222,6 +234,7 @@ export async function receivePurchaseOrder(
         }
 
         return {
+          tenantId,
           productId: line.productId,
           locationId,
           quantity: attempted,
@@ -249,11 +262,16 @@ export async function receivePurchaseOrder(
         // Raw upsert rather than `prisma.upsert`: INSERT ... ON CONFLICT is a
         // single atomic statement, so two transactions creating the first
         // on-hand row for the same (product, location) cannot collide.
+        // Raw SQL, so the tenant extension cannot reach it -- the tenant is
+        // named explicitly. The NOT NULL constraint on tenant_id is the backstop
+        // that turns a forgotten one into an immediate failure rather than a row
+        // that belongs to nobody.
         await tx.$executeRaw`
           INSERT INTO "stock_on_hand"
-            ("id", "product_id", "location_id", "quantity", "created_at", "updated_at")
+            ("id", "tenant_id", "product_id", "location_id", "quantity", "created_at", "updated_at")
           VALUES
-            (${uuidv7()}::uuid, ${productId}::uuid, ${locationId}::uuid, ${delta}, NOW(), NOW())
+            (${uuidv7()}::uuid, ${tenantId}::uuid, ${productId}::uuid, ${locationId}::uuid,
+             ${delta}, NOW(), NOW())
           ON CONFLICT ("product_id", "location_id") DO UPDATE
             SET "quantity"   = "stock_on_hand"."quantity" + EXCLUDED."quantity",
                 "updated_at" = NOW()

@@ -38,7 +38,7 @@ function applyAuthorisation(): void {
       >;
 
       field.resolve = (source, args, context, info) => {
-        enforcePolicy(fieldName, context.actor);
+        enforcePolicy(fieldName, context.actor, context.features);
         return original(source, args, context, info);
       };
     }

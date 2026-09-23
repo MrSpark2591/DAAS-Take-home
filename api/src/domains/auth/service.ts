@@ -3,7 +3,8 @@ import { z } from 'zod';
 import { unauthenticated } from '../../shared/errors.js';
 import { hashPassword, verifyPassword } from '../../shared/password.js';
 import { isPermission, type Permission } from '../../shared/permissions.js';
-import { live, prisma } from '../../shared/prisma.js';
+import { live, prisma, prismaUnscoped } from '../../shared/prisma.js';
+import { withTenant } from '../../shared/tenancy.js';
 import {
   accessTokenTtlSeconds,
   generateRefreshToken,
@@ -50,7 +51,14 @@ export async function login(rawInput: unknown, context: SessionContext): Promise
   if (!parsed.success) throw invalidCredentials();
 
   const { email, password } = parsed.data;
-  const user = await prisma.user.findFirst({ where: { email, ...live } });
+
+  // The one query that legitimately crosses tenants: sign-in happens before a
+  // tenant context exists, and the email is what determines which tenant this
+  // session belongs to. Email is globally unique, so this resolves to at most
+  // one account.
+  const user = await prismaUnscoped.user.findFirst({
+    where: { email, ...live, tenant: { deletedAt: null } },
+  });
 
   // Always run a verification, even when the user does not exist, so the
   // response time does not reveal which emails are registered.
@@ -59,7 +67,10 @@ export async function login(rawInput: unknown, context: SessionContext): Promise
 
   if (!user || !passwordMatches) throw invalidCredentials();
 
-  return issueSession(user, crypto.randomUUID(), context);
+  // Everything after this point runs inside the user's tenant.
+  return withTenant({ tenantId: user.tenantId, slug: '' }, () =>
+    issueSession(user, crypto.randomUUID(), context),
+  );
 }
 
 /**
@@ -91,7 +102,7 @@ export async function refresh(
   // Reuse detection has to revoke the token family and then reject the caller,
   // and a rollback would undo the revocation it just wrote -- the detection
   // would fire and leave the stolen session working.
-  const claimed = await prisma.refreshToken.updateMany({
+  const claimed = await prismaUnscoped.refreshToken.updateMany({
     where: {
       tokenHash,
       rotatedAt: null,
@@ -105,7 +116,7 @@ export async function refresh(
     await rejectUnclaimableToken(tokenHash);
   }
 
-  const existing = await prisma.refreshToken.findUnique({
+  const existing = await prismaUnscoped.refreshToken.findUnique({
     where: { tokenHash },
     include: { user: true },
   });
@@ -118,14 +129,18 @@ export async function refresh(
     throw unauthenticated('This account is no longer active.');
   }
 
-  return issueSession(existing.user, existing.familyId, context);
+  // The tenant comes from the stored token's owner, so a refresh cannot move a
+  // session into a different tenant even if the caller tries.
+  return withTenant({ tenantId: existing.user.tenantId, slug: '' }, () =>
+    issueSession(existing.user, existing.familyId, context),
+  );
 }
 
 /**
  * Works out why a token could not be claimed, and reacts. Always throws.
  */
 async function rejectUnclaimableToken(tokenHash: string): Promise<never> {
-  const row = await prisma.refreshToken.findUnique({
+  const row = await prismaUnscoped.refreshToken.findUnique({
     where: { tokenHash },
     select: { familyId: true, rotatedAt: true, revokedAt: true, expiresAt: true },
   });
@@ -157,7 +172,7 @@ async function rejectUnclaimableToken(tokenHash: string): Promise<never> {
 }
 
 function revokeFamily(familyId: string) {
-  return prisma.refreshToken.updateMany({
+  return prismaUnscoped.refreshToken.updateMany({
     where: { familyId, revokedAt: null },
     data: { revokedAt: new Date() },
   });
@@ -175,13 +190,13 @@ function revokeFamily(familyId: string) {
 export async function logout(presentedToken: string | null): Promise<void> {
   if (!presentedToken) return;
 
-  const existing = await prisma.refreshToken.findUnique({
+  const existing = await prismaUnscoped.refreshToken.findUnique({
     where: { tokenHash: hashRefreshToken(presentedToken) },
     select: { familyId: true },
   });
   if (!existing) return;
 
-  await prisma.refreshToken.updateMany({
+  await prismaUnscoped.refreshToken.updateMany({
     where: { familyId: existing.familyId, revokedAt: null },
     data: { revokedAt: new Date() },
   });
@@ -189,7 +204,7 @@ export async function logout(presentedToken: string | null): Promise<void> {
 
 /** Ends every session for a user, regardless of device. */
 export async function revokeAllSessions(userId: string): Promise<number> {
-  const { count } = await prisma.refreshToken.updateMany({
+  const { count } = await prismaUnscoped.refreshToken.updateMany({
     where: { userId, revokedAt: null },
     data: { revokedAt: new Date() },
   });
@@ -244,7 +259,7 @@ async function issueSession(
   const refreshToken = generateRefreshToken();
   const access = await loadEffectiveAccess(user.id);
 
-  await prisma.refreshToken.create({
+  await prismaUnscoped.refreshToken.create({
     data: {
       userId: user.id,
       tokenHash: hashRefreshToken(refreshToken),
@@ -259,6 +274,7 @@ async function issueSession(
     user,
     accessToken: await signAccessToken({
       sub: user.id,
+      tenantId: user.tenantId,
       permissions: access.permissions,
       roles: access.roles,
     }),

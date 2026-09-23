@@ -43,7 +43,11 @@ describe('signing in', () => {
     expect(beforeClaims?.permissions).not.toContain(PERMISSIONS.STOCK_RECEIVE);
 
     // Grant the viewer role a new permission -- pure data, no deploy.
-    const viewerRole = await prisma.role.findFirstOrThrow({ where: { key: 'viewer' } });
+    // Scoped to this fixture's tenant: roles are per-tenant, so every tenant has
+    // its own `viewer`, and widening someone else's would be a real bug.
+    const viewerRole = await prisma.role.findFirstOrThrow({
+      where: { key: 'viewer', tenantId: fx.tenant.id },
+    });
     const permission = await prisma.permission.findFirstOrThrow({
       where: { key: PERMISSIONS.STOCK_RECEIVE },
     });
@@ -56,7 +60,7 @@ describe('signing in', () => {
       const afterClaims = await verifyAccessToken(after.accessToken);
       expect(afterClaims?.permissions).toContain(PERMISSIONS.STOCK_RECEIVE);
     } finally {
-      // Shared reference data: leaving this behind would widen every later test.
+      // Scoped to this tenant, but still cleaned up so the fixture is inert.
       await prisma.rolePermission.delete({
         where: {
           roleId_permissionId: { roleId: viewerRole.id, permissionId: permission.id },

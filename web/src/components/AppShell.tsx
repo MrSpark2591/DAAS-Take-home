@@ -19,11 +19,15 @@ import Link from 'next/link';
 import { type ReactNode, useState } from 'react';
 import { useLogoutMutation } from '@/lib/api';
 import { useAppSelector } from '@/lib/hooks';
+import { FEATURES, hasFeature } from '@/lib/session';
 
 /** Header, nav, and the signed-in user's menu. */
 export function AppShell({ children }: { children: ReactNode }) {
   const user = useAppSelector((state) => state.session.user);
   const [logout, logoutState] = useLogoutMutation();
+  // Switched off for this organisation means the page does not exist for them,
+  // so the nav entry goes too rather than leading to an error.
+  const showStock = hasFeature(user, FEATURES.STOCK_VIEW);
   const [anchor, setAnchor] = useState<HTMLElement | null>(null);
 
   return (
@@ -44,9 +48,18 @@ export function AppShell({ children }: { children: ReactNode }) {
             DaaS
           </Typography>
 
+          {user ? (
+            <Chip
+              size="small"
+              label={user.tenant.name}
+              variant="outlined"
+              sx={{ display: { xs: 'none', md: 'inline-flex' } }}
+            />
+          ) : null}
+
           <Stack direction="row" spacing={2} sx={{ flexGrow: 1 }}>
             <NavLink href="/purchase-orders">Purchase orders</NavLink>
-            <NavLink href="/stock">Stock on hand</NavLink>
+            {showStock ? <NavLink href="/stock">Stock on hand</NavLink> : null}
           </Stack>
 
           {user ? (
@@ -94,6 +107,9 @@ export function AppShell({ children }: { children: ReactNode }) {
                 <Box sx={{ px: 2, py: 1 }}>
                   <Typography variant="body2" sx={{ fontWeight: 600 }}>
                     {user.email}
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+                    {user.tenant.name}
                   </Typography>
                   <Stack direction="row" spacing={0.5} sx={{ mt: 0.5, flexWrap: 'wrap' }}>
                     {user.roles.map((role) => (

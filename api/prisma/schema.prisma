@@ -31,8 +31,57 @@ enum MovementType {
   @@map("movement_type")
 }
 
+/// A customer of the platform. Every row of business data belongs to exactly
+/// one, and the Prisma extension in `shared/tenancy.ts` scopes every query to
+/// the tenant on the current request.
+model Tenant {
+  id   String @id @default(uuid(7)) @db.Uuid
+  /// Stable, url-safe. Used in logs and support conversations, never as a key.
+  slug String @db.VarChar(64)
+  name String @db.VarChar(160)
+
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(6)
+
+  features       TenantFeature[]
+  users          User[]
+  roles          Role[]
+  vendors        Vendor[]
+  products       Product[]
+  locations      Location[]
+  purchaseOrders PurchaseOrder[]
+  stockMovements StockMovement[]
+  stockOnHand    StockOnHand[]
+
+  @@map("tenants")
+}
+
+/// Which features a tenant has switched on.
+///
+/// Absence means off, so a new feature is dark for everyone until someone turns
+/// it on -- the safe default when the flag guards something not every customer
+/// has paid for or is ready to see.
+model TenantFeature {
+  tenantId String @map("tenant_id") @db.Uuid
+  /// Matches a key in `shared/features.ts`, which is the source of truth for
+  /// what a feature means. Unknown keys are ignored rather than trusted.
+  featureKey String  @map("feature_key") @db.VarChar(64)
+  enabled    Boolean @default(true)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@id([tenantId, featureKey])
+  @@map("tenant_features")
+}
+
 model User {
   id    String @id @default(uuid(7)) @db.Uuid
+  /// Owning tenant. Injected automatically; never set by a resolver.
+  tenantId String @map("tenant_id") @db.Uuid
   email String @db.VarChar(320)
   name  String @db.VarChar(120)
   /// scrypt, encoded as `scrypt$N$r$p$salt$hash`. The parameters travel with
@@ -47,7 +96,9 @@ model User {
   stockMovements StockMovement[]
   refreshTokens  RefreshToken[]
   roles          UserRole[]
+  tenant         Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
+  @@index([tenantId])
   @@map("users")
 }
 
@@ -76,6 +127,9 @@ model Permission {
 /// and changed without a deploy.
 model Role {
   id          String  @id @default(uuid(7)) @db.Uuid
+  /// Roles are per-tenant: each tenant gets its own copy of the system roles
+  /// and may add more, without touching anyone else's access.
+  tenantId    String  @map("tenant_id") @db.Uuid
   key         String  @db.VarChar(32)
   name        String  @db.VarChar(80)
   description String? @db.VarChar(300)
@@ -89,7 +143,9 @@ model Role {
 
   permissions RolePermission[]
   users       UserRole[]
+  tenant      Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
+  @@index([tenantId])
   @@map("roles")
 }
 
@@ -164,6 +220,8 @@ model RefreshToken {
 
 model Vendor {
   id   String  @id @default(uuid(7)) @db.Uuid
+  /// Owning tenant. Injected automatically; never set by a resolver.
+  tenantId String @map("tenant_id") @db.Uuid
   code String  @db.VarChar(32)
   name String  @db.VarChar(160)
   email String? @db.VarChar(320)
@@ -174,11 +232,16 @@ model Vendor {
 
   purchaseOrders PurchaseOrder[]
 
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
   @@map("vendors")
 }
 
 model Product {
   id   String @id @default(uuid(7)) @db.Uuid
+  /// Owning tenant. Injected automatically; never set by a resolver.
+  tenantId String @map("tenant_id") @db.Uuid
   sku  String @db.VarChar(64)
   name String @db.VarChar(200)
   // Unit of measure. Receiving is whole units only, so quantities are integers.
@@ -192,11 +255,16 @@ model Product {
   stockMovements     StockMovement[]
   stockOnHand        StockOnHand[]
 
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
   @@map("products")
 }
 
 model Location {
   id   String @id @default(uuid(7)) @db.Uuid
+  /// Owning tenant. Injected automatically; never set by a resolver.
+  tenantId String @map("tenant_id") @db.Uuid
   code String @db.VarChar(32)
   name String @db.VarChar(160)
 
@@ -208,6 +276,9 @@ model Location {
   stockMovements StockMovement[]
   stockOnHand    StockOnHand[]
 
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
   @@map("locations")
 }
 
@@ -219,6 +290,8 @@ model Location {
 /// the ledger disagree; a view cannot.
 model PurchaseOrder {
   id         String  @id @default(uuid(7)) @db.Uuid
+  /// Owning tenant. Injected automatically; never set by a resolver.
+  tenantId String @map("tenant_id") @db.Uuid
   poNumber   String  @map("po_number") @db.VarChar(32)
   vendorId   String  @map("vendor_id") @db.Uuid
   /// Default receiving location for the order. A receipt may override it
@@ -240,6 +313,9 @@ model PurchaseOrder {
   // composites on (vendor_id, id DESC) WHERE deleted_at IS NULL, which serve
   // both the filter and the keyset in one seek. Prisma cannot express partial
   // or DESC-ordered indexes, so they live in the migration SQL.
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
   @@map("purchase_orders")
 }
 
@@ -274,6 +350,8 @@ model PurchaseOrderLine {
 /// No updated_at, no deleted_at: rows are immutable.
 model StockMovement {
   id         String       @id @default(uuid(7)) @db.Uuid
+  /// Owning tenant. Injected automatically; never set by a resolver.
+  tenantId String @map("tenant_id") @db.Uuid
   productId  String       @map("product_id") @db.Uuid
   locationId String       @map("location_id") @db.Uuid
   /// Signed. Positive adds to on-hand, negative removes.
@@ -295,6 +373,9 @@ model StockMovement {
   @@index([productId, locationId])
   @@index([purchaseOrderLineId])
   @@index([createdAt])
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
   @@map("stock_movements")
 }
 
@@ -304,6 +385,8 @@ model StockMovement {
 /// this table, and `npm run check:ledger` asserts exactly that.
 model StockOnHand {
   id         String @id @default(uuid(7)) @db.Uuid
+  /// Owning tenant. Injected automatically; never set by a resolver.
+  tenantId String @map("tenant_id") @db.Uuid
   productId  String @map("product_id") @db.Uuid
   locationId String @map("location_id") @db.Uuid
   quantity   Int    @default(0)
@@ -317,5 +400,8 @@ model StockOnHand {
   @@unique([productId, locationId], map: "stock_on_hand_product_location_key")
   // (location_id, quantity) lives in the migration SQL: it serves the location
   // filter and the `inStockOnly` predicate together.
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
   @@map("stock_on_hand")
 }

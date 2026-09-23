@@ -19,6 +19,8 @@ import { verifyAccessToken } from './tokens.js';
 
 export interface Actor {
   id: string;
+  /** From the signed token, never from a request parameter. */
+  tenantId: string;
   /** Effective permissions: the union across every role the user holds. */
   permissions: ReadonlySet<Permission>;
   /** For display and audit. Deliberately not consulted when authorising. */
@@ -39,6 +41,7 @@ export async function resolveActor(accessToken: string | null): Promise<Actor | 
 
   return {
     id: claims.sub,
+    tenantId: claims.tenantId,
     permissions: new Set(claims.permissions),
     roles: claims.roles,
   };

@@ -83,6 +83,11 @@ export const resolvers = {
   },
 
   User: {
+    // From the user row, not the request context: `login` returns a user before
+    // a session exists, so there is no tenant on the context yet.
+    tenant: (user: UserRow, _a: unknown, { loaders }: Ctx) =>
+      loaders.tenantById.load(user.tenantId),
+
     roles: (user: UserRow, _a: unknown, { loaders }: Ctx) => loaders.rolesByUserId.load(user.id),
 
     permissions: async (user: UserRow, _a: unknown, { loaders }: Ctx) => {
@@ -93,6 +98,11 @@ export const resolvers = {
       // Union, sorted, so the UI gets a stable list regardless of role order.
       return [...new Set(grants.flat().map((p) => p.key))].sort();
     },
+  },
+
+  Tenant: {
+    features: (tenant: { id: string }, _a: unknown, { loaders }: Ctx) =>
+      loaders.featuresByTenantId.load(tenant.id),
   },
 
   Role: {

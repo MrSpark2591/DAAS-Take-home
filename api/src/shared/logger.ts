@@ -65,6 +65,8 @@ export const slowOperationMs = () => readInt('SLOW_OPERATION_MS', 500);
 export interface RequestLogContext {
   requestId: string;
   userId?: string | null;
+  /** Which customer's data this request touched. The first thing you filter by. */
+  tenantId?: string | null;
   ip?: string | null;
 }
 

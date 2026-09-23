@@ -7,6 +7,7 @@ import { GraphQLError } from 'graphql';
 export type ErrorCode =
   | 'UNAUTHENTICATED'
   | 'FORBIDDEN'
+  | 'FEATURE_DISABLED'
   | 'NOT_FOUND'
   | 'BAD_USER_INPUT'
   | 'OVER_RECEIPT'
@@ -25,8 +26,17 @@ export const unauthenticated = (message = 'Sign in to continue.') =>
  * `required` is echoed back so a client can say precisely which permission is
  * missing -- which is also the thing an administrator has to grant to fix it.
  */
-export const forbidden = (message: string, required?: readonly string[]) =>
-  gqlError('FORBIDDEN', message, required ? { requiredPermissions: required } : undefined);
+export const forbidden = (
+  message: string,
+  required?: readonly string[],
+  override?: { code: ErrorCode; [key: string]: unknown },
+) => {
+  const { code = 'FORBIDDEN', ...extra } = override ?? {};
+  return gqlError(code, message, {
+    ...(required ? { requiredPermissions: required } : {}),
+    ...extra,
+  });
+};
 
 export const notFound = (entity: string, id: string) =>
   gqlError('NOT_FOUND', `${entity} ${id} does not exist.`, { entity, id });

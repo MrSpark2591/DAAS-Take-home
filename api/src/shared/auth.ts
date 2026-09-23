@@ -73,6 +73,17 @@ export function requirePermission(actor: Actor | null, permission: Permission): 
   return actor;
 }
 
+/**
+ * Asserts a session exists and narrows the type.
+ *
+ * Root-field authorisation already guarantees this for anything non-public, so
+ * a throw here means the policy table and the resolver disagree.
+ */
+export function requireActor(actor: Actor | null): Actor {
+  if (!actor) throw unauthenticated();
+  return actor;
+}
+
 /** Requires every listed permission. Used where an action spans two resources. */
 export function requireAllPermissions(
   actor: Actor | null,

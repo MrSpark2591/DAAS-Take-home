@@ -97,17 +97,27 @@ locking logic is the part worth reusing.
 them, and nothing in the codebase branches on a role key.** If you find yourself
 writing `role === 'warehouse'`, stop — that is the coupling this design removes.
 
-- The catalogue lives in `api/src/shared/permissions.ts` and is the source of
-  truth: the application can only check permissions it knows at compile time.
-  Adding one means adding it there *and* inserting the row in a migration.
-- Which permissions a role grants is **data**, editable at runtime. Inventing a
-  "goods-in" role that grants `stock:receive` must work with no code change —
-  there is a test asserting exactly that.
-- Every check goes through `requirePermission` (or `requireAllPermissions`) in
-  `api/src/shared/auth.ts`. Do not read `actor.permissions` directly in a
-  resolver; one gate means one place to audit.
+**Every root field is default-deny.** The policy lives in one table in
+`api/src/shared/authorize.ts`, and `src/schema.ts` wraps every Query and Mutation
+resolver with it as the schema is built. `assertPolicyIsComplete` then runs at
+boot and **refuses to start** if any root field is missing from the table.
+
+That structure exists because the previous approach — a `requirePermission` call
+written by hand in each resolver — failed exactly how you would expect: the
+mutations were guarded, every read query shipped unguarded, and business data
+was readable with no session at all. Nothing caught it, because nothing was
+checking that a check existed.
+
+So: **do not add `requirePermission` to a new resolver.** Add the field to
+`POLICY` instead. If you forget, the server will not boot, and the error names
+the field.
+
 - A user may hold several roles. Effective permissions are the **union**, so
   roles add access and never remove it.
+- Only root fields are wrapped; nested fields are reached *through* a root
+  field, so gating the entry point gates the subtree.
+- `PUBLIC` entries need a comment saying why. There are four, all of them
+  necessary to obtain a session.
 
 The UI mirrors this via `can(user, PERMISSIONS.X)` in `web/src/lib/session.ts`.
 **The UI copy is cosmetic.** A client-side check is never a substitute for the

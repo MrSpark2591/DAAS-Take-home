@@ -217,6 +217,25 @@ Assign it, sign in again, and `receivePurchaseOrder` works — with no code chan
 
 ---
 
+## 3c. The API is the boundary
+
+Every read is gated too, not just the mutations. With no cookie and no token:
+
+```bash
+curl -s http://localhost:4000/ -H 'content-type: application/json' \
+  -d '{"query":"{ purchaseOrders { totalCount } }"}'
+```
+
+```json
+{ "errors": [{ "message": "Sign in to continue.",
+               "extensions": { "code": "UNAUTHENTICATED" } }] }
+```
+
+The policy is declared once per root field and applied as the schema is built, and the
+server refuses to boot if a field has no entry — so a new resolver cannot ship unguarded.
+
+---
+
 ## 4. The PO detail, including receipt history
 
 Each line carries its own audit trail: who received what, into which location, when, and

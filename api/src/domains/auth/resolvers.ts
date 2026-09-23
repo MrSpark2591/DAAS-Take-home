@@ -1,6 +1,5 @@
 import type { Role as RoleRow, User as UserRow } from '@prisma/client';
 import type { GraphQLContext } from '../../context.js';
-import { requirePermission } from '../../shared/auth.js';
 import { PERMISSION_DESCRIPTIONS, PERMISSIONS, type Permission } from '../../shared/permissions.js';
 import { live } from '../../shared/prisma.js';
 import { clearSessionCookies, setSessionCookies } from './cookies.js';
@@ -19,10 +18,9 @@ export const resolvers = {
     me: async (_p: unknown, _a: unknown, { actor, loaders }: Ctx) =>
       actor ? loaders.userById.load(actor.id) : null,
 
-    roles: (_p: unknown, _a: unknown, { actor, db }: Ctx) => {
-      requirePermission(actor, PERMISSIONS.ROLE_MANAGE);
-      return db.role.findMany({ where: live, orderBy: { name: 'asc' } });
-    },
+    // Gated on `role:manage` by the schema-wide policy in shared/authorize.ts.
+    roles: (_p: unknown, _a: unknown, { db }: Ctx) =>
+      db.role.findMany({ where: live, orderBy: { name: 'asc' } }),
 
     // Static catalogue, so no database round trip and no permission gate:
     // knowing what permissions exist reveals nothing about who holds them.

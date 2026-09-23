@@ -2,7 +2,7 @@ import { ApolloServer } from '@apollo/server';
 import { startStandaloneServer } from '@apollo/server/standalone';
 import type { GraphQLContext } from './context.js';
 import { createContext } from './context.js';
-import { resolvers, typeDefs } from './schema.js';
+import { schema } from './schema.js';
 import { logger } from './shared/logger.js';
 import { loggingPlugin } from './shared/logging-plugin.js';
 import { prisma } from './shared/prisma.js';
@@ -10,8 +10,9 @@ import { prisma } from './shared/prisma.js';
 const PORT = Number(process.env.PORT ?? 4000);
 
 const server = new ApolloServer<GraphQLContext>({
-  typeDefs,
-  resolvers,
+  // Authorisation is applied to every root field as the schema is built, so it
+  // cannot be forgotten on a new resolver. See src/shared/authorize.ts.
+  schema,
   plugins: [loggingPlugin],
   // The UI branches on `extensions.code`, so stack traces add nothing and leak
   // schema internals. Known codes pass through untouched; anything else is a

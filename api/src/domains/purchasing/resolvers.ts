@@ -10,8 +10,7 @@ import type {
 } from '@prisma/client';
 import { DateTimeResolver } from 'graphql-scalars';
 import type { GraphQLContext } from '../../context.js';
-import { requirePermission } from '../../shared/auth.js';
-import { PERMISSIONS } from '../../shared/permissions.js';
+import { requireActor } from '../../shared/auth.js';
 import { live } from '../../shared/prisma.js';
 import {
   inIdOrder,
@@ -86,18 +85,14 @@ export const resolvers = {
 
   Mutation: {
     createPurchaseOrder: (_p: unknown, args: { input: unknown }, { actor }: Ctx) =>
-      service.createPurchaseOrder(
-        requirePermission(actor, PERMISSIONS.PURCHASE_ORDER_CREATE),
-        args.input,
-      ),
+      service.createPurchaseOrder(requireActor(actor), args.input),
 
     // The guarded mutation. Gated on the permission, not on a role: a bespoke
     // "goods-in" role granting stock:receive works here with no code change.
     receivePurchaseOrder: (_p: unknown, args: { input: unknown }, { actor }: Ctx) =>
-      service.receivePurchaseOrder(requirePermission(actor, PERMISSIONS.STOCK_RECEIVE), args.input),
+      service.receivePurchaseOrder(requireActor(actor), args.input),
 
-    voidPurchaseOrder: (_p: unknown, args: { id: string }, { actor }: Ctx) => {
-      requirePermission(actor, PERMISSIONS.PURCHASE_ORDER_VOID);
+    voidPurchaseOrder: (_p: unknown, args: { id: string }) => {
       return service.voidPurchaseOrder(args.id);
     },
   },

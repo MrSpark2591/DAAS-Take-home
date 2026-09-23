@@ -318,12 +318,33 @@ and line products is a fixed handful of queries rather than a few hundred.
 ### Authorisation: permissions, not roles
 
 Roles are **named bundles of permissions**, and nothing in the codebase branches on a
-role key. Every guarded resolver asks for a permission:
+role key.
+
+**Authorisation is default-deny and applied at the schema, not in each resolver.** The
+policy is one table in [`authorize.ts`](api/src/shared/authorize.ts), and every Query and
+Mutation root field is wrapped with it as the schema is built:
 
 ```ts
-receivePurchaseOrder: (_p, args, { actor }) =>
-  service.receivePurchaseOrder(requirePermission(actor, PERMISSIONS.STOCK_RECEIVE), args.input),
+const POLICY: Record<string, Policy> = {
+  login:                'PUBLIC',          // necessarily reachable while signed out
+  me:                   'AUTHENTICATED',   // a session, but no particular permission
+  purchaseOrders:       PERMISSIONS.PURCHASE_ORDER_READ,
+  stockOnHand:          PERMISSIONS.STOCK_READ,
+  receivePurchaseOrder: PERMISSIONS.STOCK_RECEIVE,
+  // …
+};
 ```
+
+A boot-time check refuses to start the server if any root field is missing from that
+table, naming the field. Adding a resolver without deciding who may call it is a startup
+crash, not a silent hole.
+
+That structure is there because the obvious alternative failed. Guards written by hand in
+each resolver covered all three mutations and **none** of the reads — purchase orders with
+costs, vendor contact emails and stock levels were readable with no session at all. Nothing
+caught it, because nothing was checking that a check existed. Moving the decision into one
+reviewable table, and making its completeness a startup assertion, fixes the class rather
+than the instances.
 
 | Table | Holds |
 | --- | --- |

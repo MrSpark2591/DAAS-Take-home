@@ -98,7 +98,15 @@ export function ReceiveDialog({ open, onClose, purchaseOrder }: ReceiveDialogPro
   const error = asApiError(receiveState.error);
 
   return (
-    <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth>
+    <Dialog
+      open={open}
+      // Undefined while the receipt is in flight, which is what stops the
+      // backdrop and Escape from closing it. Dismissing the dialog does not
+      // cancel the transaction -- it only hides the outcome of one.
+      onClose={receiveState.isLoading ? undefined : onClose}
+      maxWidth="md"
+      fullWidth
+    >
       <form onSubmit={onSubmit} noValidate>
         <DialogTitle>Receive against {purchaseOrder.poNumber}</DialogTitle>
 
@@ -198,10 +206,15 @@ export function ReceiveDialog({ open, onClose, purchaseOrder }: ReceiveDialogPro
         </DialogContent>
 
         <DialogActions sx={{ px: 3, pb: 2 }}>
-          <Button onClick={onClose} color="inherit">
+          <Button onClick={onClose} color="inherit" disabled={receiveState.isLoading}>
             Cancel
           </Button>
-          <Button type="submit" variant="contained" disabled={receiveState.isLoading}>
+          <Button
+            type="submit"
+            variant="contained"
+            loading={receiveState.isLoading}
+            loadingPosition="start"
+          >
             {receiveState.isLoading ? 'Receiving…' : 'Confirm receipt'}
           </Button>
         </DialogActions>

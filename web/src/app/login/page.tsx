@@ -148,7 +148,8 @@ function LoginForm() {
               type="submit"
               variant="contained"
               size="large"
-              disabled={isSubmitting || loginState.isLoading}
+              loading={isSubmitting || loginState.isLoading}
+              loadingPosition="start"
             >
               {loginState.isLoading ? 'Signing in…' : 'Sign in'}
             </Button>

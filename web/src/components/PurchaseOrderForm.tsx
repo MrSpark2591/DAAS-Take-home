@@ -317,13 +317,18 @@ export function PurchaseOrderForm() {
           <Typography color="text.secondary">
             Estimated total <strong>{formatCents(estimatedTotalCents)}</strong>
           </Typography>
-          <Button onClick={() => router.push('/purchase-orders')} color="inherit">
+          <Button
+            onClick={() => router.push('/purchase-orders')}
+            color="inherit"
+            disabled={createState.isLoading}
+          >
             Cancel
           </Button>
           <Button
             type="submit"
             variant="contained"
-            disabled={isSubmitting || createState.isLoading}
+            loading={isSubmitting || createState.isLoading}
+            loadingPosition="start"
           >
             {createState.isLoading ? 'Creating…' : 'Create purchase order'}
           </Button>
